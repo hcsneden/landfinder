@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+cdk.out/
+
+# TypeScript
+*.tsbuildinfo
+
+# CDK — may contain AWS account IDs from synth/deploy
+cdk.context.json
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Expo
+.expo/
+web-build/
+expo-env.d.ts
+
+# Native mobile
+.kotlin/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+/ios
+/android
+
+# AWS CDK staging
+.cdk-staging/
+
+# Coverage
+coverage/
+.nyc_output/

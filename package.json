@@ -1,0 +1,33 @@
+{
+  "name": "landfinder",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*",
+    "infrastructure"
+  ],
+  "scripts": {
+    "web": "npm run dev --workspace=apps/web",
+    "web:build": "npm run build --workspace=apps/web",
+    "mobile": "npm run start --workspace=apps/mobile",
+    "mobile:ios": "npm run ios --workspace=apps/mobile",
+    "mobile:android": "npm run android --workspace=apps/mobile",
+    "mobile:web": "npm run web --workspace=apps/mobile",
+    "infra:deploy": "npm run deploy --workspace=infrastructure",
+    "infra:synth": "npm run synth --workspace=infrastructure",
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
