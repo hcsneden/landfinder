@@ -114,6 +114,11 @@ export const searchApi = {
 
 // Parcel API
 export const parcelApi = {
+  lookupParcel: async (q: string): Promise<ApiResponse<Parcel>> => {
+    const response = await apiClient.get('/parcels/lookup', { params: { q } });
+    return response.data;
+  },
+
   getParcel: async (id: string): Promise<ApiResponse<Parcel>> => {
     const response = await apiClient.get(`/parcels/${id}`);
     return response.data;

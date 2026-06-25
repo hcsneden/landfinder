@@ -41,6 +41,7 @@ export class AuthStack extends cdk.Stack {
       userPool: this.userPool,
       userPoolClientName: 'landfinder-mobile-app',
       authFlows: {
+        adminUserPassword: true,
         userPassword: true,
         userSrp: true,
       },

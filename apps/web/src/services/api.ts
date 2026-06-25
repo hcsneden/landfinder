@@ -25,7 +25,8 @@ function getToken(): string | null {
     const stored = localStorage.getItem('landfinder-session')
     if (!stored) return null
     const parsed = JSON.parse(stored) as { state?: { tokens?: AuthTokens } }
-    return parsed?.state?.tokens?.accessToken ?? null
+    const t = parsed?.state?.tokens
+    return t?.idToken ?? t?.accessToken ?? null
   } catch {
     return null
   }
@@ -88,6 +89,7 @@ export const searchApi = {
 }
 
 export const parcelApi = {
+  lookupParcel: (q: string) => apiFetch<Parcel>(`/parcels/lookup?q=${encodeURIComponent(q)}`),
   getParcel: (id: string) => apiFetch<Parcel>(`/parcels/${id}`),
   getWaterRights: (id: string) => apiFetch<WaterRight[]>(`/parcels/${id}/water-rights`),
   getListings: (id: string) => apiFetch<Listing[]>(`/parcels/${id}/listings`),

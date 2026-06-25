@@ -29,7 +29,7 @@ const databaseStack = new DatabaseStack(app, 'LandFinderDatabaseStack', {
 // Example: ALLOWED_ORIGINS=https://app.landfinder.com,https://www.landfinder.com
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-  : ['http://localhost:5173']; // local dev only
+  : ['http://localhost:5173', 'http://localhost:3001']; // local dev
 
 // API stack (API Gateway + Lambda)
 const apiStack = new ApiStack(app, 'LandFinderApiStack', {
@@ -38,6 +38,7 @@ const apiStack = new ApiStack(app, 'LandFinderApiStack', {
   userPool: authStack.userPool,
   userPoolClient: authStack.userPoolClient,
   database: databaseStack.database,
+  vpc: databaseStack.vpc,
   usersTable: databaseStack.usersTable,
   searchesTable: databaseStack.searchesTable,
   allowedOrigins,

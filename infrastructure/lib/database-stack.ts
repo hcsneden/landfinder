@@ -58,7 +58,7 @@ export class DatabaseStack extends cdk.Stack {
     this.database = new rds.DatabaseInstance(this, 'LandFinderDatabase', {
       instanceIdentifier: 'landfinder-db',
       engine: rds.DatabaseInstanceEngine.postgres({
-        version: rds.PostgresEngineVersion.VER_16_4,
+        version: rds.PostgresEngineVersion.VER_16_9,
       }),
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO), // MVP: t3.micro
       vpc: this.vpc,

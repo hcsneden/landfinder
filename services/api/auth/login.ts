@@ -86,6 +86,7 @@ export async function handler(
 
     const tokens: AuthTokens = {
       accessToken: AccessToken,
+      idToken: IdToken,
       refreshToken: RefreshToken,
       expiresIn: ExpiresIn ?? 3600,
     };

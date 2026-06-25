@@ -1,23 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button, Card, CardContent, Badge, Typography } from '@hcsneden/design-library'
 import { useStore } from '../store'
 import { parcelApi, userApi } from '../services/api'
 import {
   formatAcreage,
-  formatPrice,
-  formatPricePerAcre,
   formatDate,
   formatWaterType,
   formatFlowRate,
   formatVolume,
-  getListingSourceLabel,
 } from '@landfinder/shared'
-import type { WaterRight, Listing, ParcelInsight } from '@landfinder/shared'
+import type { WaterRight, ParcelInsight } from '@landfinder/shared'
 
 export function ParcelDetailSheet() {
   const { selectedParcelId, isDetailOpen, searchResults, setDetailOpen } = useStore()
   const qc = useQueryClient()
-  const [saveNotes] = useState('')
 
   const resultPreview = searchResults.find((r) => r.parcel.id === selectedParcelId)
 
@@ -39,15 +36,6 @@ export function ParcelDetailSheet() {
     enabled: !!selectedParcelId,
   })
 
-  const listingsQ = useQuery({
-    queryKey: ['listings', selectedParcelId],
-    queryFn: () => parcelApi.getListings(selectedParcelId!).then((r) => {
-      if (!r.success || !r.data) throw new Error(r.error?.message)
-      return r.data
-    }),
-    enabled: !!selectedParcelId,
-  })
-
   const insightsQ = useQuery({
     queryKey: ['insights', selectedParcelId],
     queryFn: () => parcelApi.getInsights(selectedParcelId!).then((r) => {
@@ -58,24 +46,19 @@ export function ParcelDetailSheet() {
   })
 
   const saveMutation = useMutation({
-    mutationFn: () => userApi.saveParcel(selectedParcelId!, saveNotes || undefined),
+    mutationFn: () => userApi.saveParcel(selectedParcelId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['savedParcels'] }),
   })
 
-  // Use preview data while full data loads
   const parcel = parcelQ.data
-  const previewListingPrice = resultPreview?.listing?.price
-  const displayPrice = listingsQ.data?.[0]?.price ?? previewListingPrice ?? null
   const acreage = parcel?.acreage ?? resultPreview?.parcel.acreage ?? null
   const location = parcel?.address
     ?? (parcel ? `${parcel.county ?? 'Unknown'} County, MT` : null)
     ?? (resultPreview ? `${resultPreview.parcel.county ?? 'Unknown'} County, MT` : null)
 
   const waterRights: WaterRight[] = waterQ.data ?? []
-  const listings: Listing[] = listingsQ.data ?? []
   const insights: ParcelInsight[] = insightsQ.data ?? []
 
-  // Keyboard dismiss
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setDetailOpen(false)
@@ -91,45 +74,31 @@ export function ParcelDetailSheet() {
         <div className="detail-header-info">
           <div className="detail-acres">{formatAcreage(acreage)}</div>
           {location && <div className="detail-location">{location}</div>}
-          {displayPrice && (
-            <>
-              <div className="detail-price">{formatPrice(displayPrice)}</div>
-              <div className="detail-price-per-acre">
-                {formatPricePerAcre(displayPrice, acreage)}
-              </div>
-            </>
-          )}
         </div>
-        <button
-          className="detail-close-btn"
-          onClick={() => setDetailOpen(false)}
-          title="Close (Esc)"
-        >
-          ×
-        </button>
+        <div className="detail-close-wrap">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setDetailOpen(false)}
+            title="Close (Esc)"
+          >
+            ×
+          </Button>
+        </div>
       </div>
 
       {/* ── Actions ── */}
       <div className="detail-actions">
-        <button
-          className="detail-save-btn"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => saveMutation.mutate()}
           disabled={saveMutation.isPending}
         >
           {saveMutation.isPending ? (
-            <span className="spinner" style={{ width: 12, height: 12, borderTopColor: 'white' }} />
+            <span className="spinner" />
           ) : saveMutation.isSuccess ? '✓ Saved' : '♡ Save parcel'}
-        </button>
-        {listings[0]?.listingUrl && (
-          <a
-            href={listings[0].listingUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="detail-link-btn"
-          >
-            View listing ↗
-          </a>
-        )}
+        </Button>
       </div>
 
       {/* ── Body ── */}
@@ -192,31 +161,19 @@ export function ParcelDetailSheet() {
           )}
         </div>
 
-        {/* Listings */}
-        <div className="detail-section">
-          <div className="section-title">Active Listings</div>
-          {listingsQ.isLoading ? (
-            <LoadingSkeleton rows={2} />
-          ) : listings.length === 0 ? (
-            <EmptyState text="No active listings found for this parcel." />
-          ) : (
-            listings.map((l) => <ListingCard key={l.id} listing={l} />)
-          )}
-        </div>
-
-        {/* Road & Access — placeholder for future data */}
+        {/* Road & Access */}
         <div className="detail-section">
           <div className="section-title">Road & Legal Access</div>
           <ComingSoon label="Access data" />
         </div>
 
-        {/* Utility Access — placeholder */}
+        {/* Utility Access */}
         <div className="detail-section">
           <div className="section-title">Utilities & Grid Access</div>
           <ComingSoon label="Utility data" />
         </div>
 
-        {/* Environmental — placeholder */}
+        {/* Environmental */}
         <div className="detail-section">
           <div className="section-title">Environmental & Risk</div>
           <ComingSoon label="Wildfire risk, flood zone, mining history" />
@@ -236,11 +193,11 @@ export function ParcelDetailSheet() {
 
         {/* Data disclaimer */}
         <div style={{ padding: '16px 20px' }}>
-          <p style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.6 }}>
+          <Typography variant="caption" muted>
             Data sourced from Montana DNRC, Montana Cadastral, and public listing aggregators.
             LandFinder does not guarantee accuracy. Verify water rights, access, and encumbrances
             through county records and a licensed real estate attorney before purchase.
-          </p>
+          </Typography>
         </div>
       </div>
     </aside>
@@ -248,11 +205,14 @@ export function ParcelDetailSheet() {
 }
 
 function WaterRightCard({ wr }: { wr: WaterRight }) {
+  const statusClass = `wr-status-${wr.status}`
   return (
-    <div className="wr-card">
+    <Card className="wr-card">
       <div className="wr-card-head">
         <code className="wr-number">{wr.waterRightNumber ?? 'Unknown'}</code>
-        <span className={`wr-status ${wr.status}`}>{wr.status}</span>
+        <Badge variant="subtle" className={statusClass}>
+          {wr.status}
+        </Badge>
       </div>
       <div className="wr-body">
         <div className="wr-field">
@@ -282,30 +242,7 @@ function WaterRightCard({ wr }: { wr: WaterRight }) {
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-function ListingCard({ listing }: { listing: Listing }) {
-  return (
-    <a
-      href={listing.listingUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="listing-card"
-    >
-      <div className="listing-card-head">
-        <span className="listing-source">{getListingSourceLabel(listing.source)}</span>
-        <span className="listing-price-big">{formatPrice(listing.price)}</span>
-      </div>
-      {listing.description && (
-        <div className="listing-description">{listing.description}</div>
-      )}
-      <div className="listing-footer">
-        <span className="listing-date">Listed {formatDate(listing.listedAt)}</span>
-        <span className="listing-cta">View listing ↗</span>
-      </div>
-    </a>
+    </Card>
   )
 }
 
@@ -318,13 +255,17 @@ function InsightCard({ insight }: { insight: ParcelInsight }) {
     potential_issues: 'Potential Issues',
   }
   return (
-    <div className="insight-card">
-      <div className="insight-head">
-        <span className="insight-type">{titles[insight.insightType] ?? insight.insightType}</span>
-      </div>
-      <div className="insight-body">{insight.content}</div>
-      <div className="insight-meta">Generated {formatDate(insight.createdAt)}</div>
-    </div>
+    <Card className="insight-card-wrap">
+      <CardContent className="insight-card-content">
+        <Badge variant="subtle" className="insight-type-badge">
+          {titles[insight.insightType] ?? insight.insightType}
+        </Badge>
+        <Typography variant="body-sm" className="insight-body">
+          {insight.content}
+        </Typography>
+        <span className="insight-meta">Generated {formatDate(insight.createdAt)}</span>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -342,27 +283,13 @@ function LoadingSkeleton({ rows }: { rows: number }) {
   )
 }
 
-function EmptyState({ text }: { text: string }) {
-  return (
-    <p style={{ fontSize: 12, color: 'var(--ink-4)', fontStyle: 'italic' }}>{text}</p>
-  )
-}
-
 function ComingSoon({ label }: { label: string }) {
   return (
-    <div style={{
-      padding: '10px 14px',
-      background: 'var(--cream-mid)',
-      borderRadius: 'var(--radius)',
-      border: '1px solid var(--border)',
-      fontSize: 11,
-      color: 'var(--ink-4)',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-    }}>
-      <span style={{ opacity: 0.5 }}>○</span>
-      {label} — enrichment pipeline coming soon
-    </div>
+    <Card className="coming-soon-card">
+      <CardContent>
+        <span style={{ opacity: 0.5 }}>○</span>
+        {label} — enrichment pipeline coming soon
+      </CardContent>
+    </Card>
   )
 }

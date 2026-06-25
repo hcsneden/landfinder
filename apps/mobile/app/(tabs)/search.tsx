@@ -9,10 +9,11 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { searchApi } from '../../services/api';
+import { searchApi, parcelApi } from '../../services/api';
 import {
   MONTANA_COUNTIES,
   formatAcreage,
@@ -200,6 +201,109 @@ function SearchResultCard({ result }: { result: SearchResult }) {
   );
 }
 
+function LookupBar() {
+  const [query, setQuery] = useState('');
+  const [isLooking, setIsLooking] = useState(false);
+
+  const handleLookup = async () => {
+    const q = query.trim();
+    if (!q) return;
+    setIsLooking(true);
+    const res = await parcelApi.lookupParcel(q);
+    setIsLooking(false);
+    if (res.success && res.data) {
+      router.push(`/parcel/${res.data.id}`);
+    } else {
+      Alert.alert(
+        'Not Found',
+        res.error?.code === '404'
+          ? 'No parcel found. Try a street address, parcel number, or geocode.'
+          : (res.error?.message ?? 'Lookup failed')
+      );
+    }
+  };
+
+  return (
+    <View style={lookupStyles.container}>
+      <Text style={lookupStyles.label}>Quick Lookup</Text>
+      <View style={lookupStyles.row}>
+        <TextInput
+          style={lookupStyles.input}
+          placeholder="Address, parcel number, or geocode…"
+          placeholderTextColor="#999"
+          value={query}
+          onChangeText={setQuery}
+          onSubmitEditing={handleLookup}
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!isLooking}
+        />
+        <TouchableOpacity
+          style={[lookupStyles.btn, (!query.trim() || isLooking) && lookupStyles.btnDisabled]}
+          onPress={handleLookup}
+          disabled={!query.trim() || isLooking}
+        >
+          {isLooking
+            ? <ActivityIndicator color="#fff" size="small" />
+            : <Text style={lookupStyles.btnText}>Go</Text>}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const lookupStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  btn: {
+    backgroundColor: '#1a5f2a',
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 52,
+  },
+  btnDisabled: {
+    backgroundColor: '#88b892',
+  },
+  btnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+});
+
 export default function SearchScreen() {
   const [criteria, setCriteria] = useState<SearchCriteria>({
     state: 'MT',
@@ -253,6 +357,7 @@ export default function SearchScreen() {
         renderItem={({ item }) => <SearchResultCard result={item} />}
         ListHeaderComponent={
           <>
+            <LookupBar />
             <SearchFilters criteria={criteria} onUpdate={updateCriteria} />
             <TouchableOpacity
               style={[styles.searchButton, isSearching && styles.searchButtonDisabled]}

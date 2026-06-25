@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { SearchResult, AuthTokens, User } from '@landfinder/shared'
+import type { SearchResult, AuthTokens, User, Parcel } from '@landfinder/shared'
 
 export interface BBox {
   minLng: number
@@ -20,6 +20,7 @@ interface AppState {
   isSearching: boolean
   searchError: string | null
   setSearchResults: (results: SearchResult[], jobId: string) => void
+  setLookedUpParcel: (parcel: Parcel) => void
   setSearching: (v: boolean) => void
   setSearchError: (err: string | null) => void
   clearSearch: () => void
@@ -53,6 +54,14 @@ export const useStore = create<AppState>()(
       searchError: null,
       setSearchResults: (results, jobId) =>
         set({ searchResults: results, searchJobId: jobId, isSearching: false, searchError: null }),
+      setLookedUpParcel: (parcel) =>
+        set({
+          searchResults: [{ parcel, listing: null, hasWaterRights: false, previewInsight: null }],
+          selectedParcelId: parcel.id,
+          isDetailOpen: true,
+          isSearching: false,
+          searchError: null,
+        }),
       setSearching: (v) => set({ isSearching: v, searchError: null }),
       setSearchError: (err) => set({ searchError: err, isSearching: false }),
       clearSearch: () => set({ searchResults: [], searchJobId: null }),

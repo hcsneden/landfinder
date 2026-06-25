@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Button, Input, Typography } from '@hcsneden/design-library'
 import { authApi } from '../services/api'
 import { useStore } from '../store'
 
@@ -63,59 +64,57 @@ export function AuthPage() {
       </div>
 
       <div className="auth-form-wrap">
-        <h1 className="auth-form-title">
-          {mode === 'login' ? 'Sign in' : 'Create account'}
-        </h1>
-        <p className="auth-form-sub">
-          {mode === 'login'
-            ? 'Continue your land research'
-            : 'Start researching Montana land'}
-        </p>
+        <div className="auth-form-head">
+          <Typography variant="h3" as="h1">
+            {mode === 'login' ? 'Sign in' : 'Create account'}
+          </Typography>
+          <Typography variant="body-sm" muted>
+            {mode === 'login'
+              ? 'Continue your land research'
+              : 'Start researching Montana land'}
+          </Typography>
+        </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
           {error && <div className="auth-error">{error}</div>}
 
-          <div className="auth-field">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              className="auth-input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              required
-              autoFocus
-            />
-          </div>
+          <Input
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
+            autoFocus
+          />
 
-          <div className="auth-field">
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              className="auth-input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === 'register' ? 'At least 8 characters' : ''}
-              required
-              minLength={mode === 'register' ? 8 : undefined}
-            />
-          </div>
+          <Input
+            label="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={mode === 'register' ? 'At least 8 characters' : ''}
+            required
+            minLength={mode === 'register' ? 8 : undefined}
+          />
 
-          <button className="auth-submit" type="submit" disabled={loading}>
-            {loading && <span className="spinner" style={{ borderTopColor: 'white' }} />}
+          <Button type="submit" variant="primary" size="lg" disabled={loading}>
+            {loading && <span className="spinner" />}
             {loading
               ? mode === 'login' ? 'Signing in…' : 'Creating account…'
               : mode === 'login' ? 'Sign in' : 'Create account'}
-          </button>
+          </Button>
         </form>
 
         <p className="auth-switch">
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
-          <button onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null) }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null) }}
+          >
             {mode === 'login' ? 'Create one' : 'Sign in'}
-          </button>
+          </Button>
         </p>
       </div>
     </div>

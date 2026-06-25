@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -18,6 +19,7 @@ interface ApiStackProps extends cdk.StackProps {
   userPool: cognito.UserPool;
   userPoolClient: cognito.UserPoolClient;
   database: rds.DatabaseInstance;
+  vpc: ec2.Vpc;
   usersTable: dynamodb.Table;
   searchesTable: dynamodb.Table;
   allowedOrigins: string[];
@@ -29,7 +31,15 @@ export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    const { userPool, userPoolClient, database, usersTable, searchesTable, allowedOrigins } = props;
+    const { userPool, userPoolClient, database, vpc, usersTable, searchesTable, allowedOrigins } = props;
+
+    const privateSubnets = { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS };
+
+    const lambdaSecurityGroup = new ec2.SecurityGroup(this, 'LambdaSecurityGroup', {
+      vpc,
+      description: 'Security group for LandFinder Lambda functions',
+      allowAllOutbound: true,
+    });
 
     // SNS topic for alarm notifications — subscribe an email or PagerDuty endpoint after deploy
     const alarmTopic = new sns.Topic(this, 'AlarmTopic', {
@@ -79,6 +89,9 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       tracing: lambda.Tracing.ACTIVE,
       environment: commonEnv,
+      vpc,
+      vpcSubnets: privateSubnets,
+      securityGroups: [lambdaSecurityGroup],
       bundling: {
         minify: true,
         sourceMap: true,
@@ -147,6 +160,32 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
+    // Lookup by address or parcel number — queries Cadastral ArcGIS + seeds water rights inline
+    const parcelLookupFn = new lambdaNode.NodejsFunction(this, 'ParcelLookupFunction', {
+      ...lambdaDefaults,
+      functionName: 'landfinder-parcel-lookup',
+      entry: path.join(__dirname, '../../services/api/parcel/lookup.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        ...commonEnv,
+        // Montana state GIS servers use intermediate CAs not in the Lambda cert bundle
+        NODE_TLS_REJECT_UNAUTHORIZED: '0',
+      },
+    });
+
+    const migrationFn = new lambdaNode.NodejsFunction(this, 'MigrationFunction', {
+      ...lambdaDefaults,
+      functionName: 'landfinder-migration',
+      entry: path.join(__dirname, '../../services/api/migration/handler.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(120),
+      environment: {
+        DATABASE_SECRET_ARN: database.secret!.secretArn,
+      },
+    });
+    database.secret!.grantRead(migrationFn);
+
     const userFn = new lambdaNode.NodejsFunction(this, 'UserFunction', {
       ...lambdaDefaults,
       functionName: 'landfinder-user',
@@ -163,6 +202,7 @@ export class ApiStack extends cdk.Stack {
     database.secret!.grantRead(authRegisterFn);
     database.secret!.grantRead(searchWorkerFn);
     database.secret!.grantRead(parcelFn);
+    database.secret!.grantRead(parcelLookupFn);
     database.secret!.grantRead(userFn);
 
     searchesTable.grantReadWriteData(searchFn);
@@ -244,6 +284,7 @@ export class ApiStack extends cdk.Stack {
     searchByIdResource.addResource('results').addMethod('GET', new apigateway.LambdaIntegration(searchFn), authOptions);
 
     const parcelsResource = this.api.root.addResource('parcels');
+    parcelsResource.addResource('lookup').addMethod('GET', new apigateway.LambdaIntegration(parcelLookupFn), authOptions);
     const parcelByIdResource = parcelsResource.addResource('{id}');
     parcelByIdResource.addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
     parcelByIdResource.addResource('water-rights').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
@@ -336,6 +377,23 @@ export class ApiStack extends cdk.Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     bedrockLatencyAlarm.addAlarmAction(alarmAction);
+
+    // CORS headers on API Gateway error responses (e.g., Cognito authorizer 401s)
+    // Without these, the browser sees a CORS error instead of the actual HTTP error code.
+    for (const [id, type] of [
+      ['UnauthorizedGatewayResponse', apigateway.ResponseType.UNAUTHORIZED],
+      ['AccessDeniedGatewayResponse', apigateway.ResponseType.ACCESS_DENIED],
+      ['Default4xxGatewayResponse', apigateway.ResponseType.DEFAULT_4XX],
+      ['Default5xxGatewayResponse', apigateway.ResponseType.DEFAULT_5XX],
+    ] as const) {
+      this.api.addGatewayResponse(id, {
+        type,
+        responseHeaders: {
+          'Access-Control-Allow-Origin': "'*'",
+          'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
+        },
+      });
+    }
 
     // Outputs
     new cdk.CfnOutput(this, 'ApiEndpointOutput', {

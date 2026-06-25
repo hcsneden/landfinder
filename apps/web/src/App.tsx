@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { ThemeProvider, trailhead } from '@hcsneden/design-library'
 import { useStore } from './store'
 import { AuthPage } from './pages/AuthPage'
 import { MapPage } from './pages/MapPage'
@@ -11,16 +12,18 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/auth" element={<AuthPage />} />
-      <Route
-        path="/*"
-        element={
-          <RequireAuth>
-            <MapPage />
-          </RequireAuth>
-        }
-      />
-    </Routes>
+    <ThemeProvider theme={trailhead}>
+      <Routes>
+        <Route path="/auth" element={<AuthPage />} />
+        <Route
+          path="/*"
+          element={
+            <RequireAuth>
+              <MapPage />
+            </RequireAuth>
+          }
+        />
+      </Routes>
+    </ThemeProvider>
   )
 }

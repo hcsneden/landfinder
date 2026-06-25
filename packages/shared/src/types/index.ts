@@ -144,6 +144,7 @@ export interface PaginatedResponse<T> {
 // Auth types
 export interface AuthTokens {
   accessToken: string;
+  idToken: string;
   refreshToken: string;
   expiresIn: number;
 }

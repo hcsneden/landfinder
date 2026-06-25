@@ -56,7 +56,7 @@ export async function getPool(): Promise<Pool> {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
     ssl: {
-      rejectUnauthorized: true,
+      rejectUnauthorized: false,
     },
   });
 

@@ -8,17 +8,13 @@ import { formatPrice } from '@landfinder/shared'
 // CARTO Voyager — free, no API key required
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
 
-interface MapViewProps {
-  onDrawComplete?: (bbox: BBox) => void
-}
-
 function formatCompactPrice(price: number): string {
   if (price >= 1_000_000) return `$${(price / 1_000_000).toFixed(1)}M`
   if (price >= 1_000) return `$${Math.round(price / 1_000)}K`
   return formatPrice(price)
 }
 
-export function MapView({ onDrawComplete }: MapViewProps) {
+export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<{ marker: maplibregl.Marker; el: HTMLElement; id: string }[]>([])
@@ -196,9 +192,8 @@ export function MapView({ onDrawComplete }: MapViewProps) {
 
       setDrawnBBox(bbox)
       setDrawMode(false)
-      onDrawComplete?.(bbox)
     },
-    [isDrawMode, setDrawnBBox, setDrawMode, onDrawComplete]
+    [isDrawMode, setDrawnBBox, setDrawMode]
   )
 
   // Attach/detach draw handlers

@@ -4,6 +4,7 @@ import { Text, View, StyleSheet } from 'react-native';
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
   const icons: Record<string, string> = {
     search: '🔍',
+    map: '🗺️',
     saved: '❤️',
     profile: '👤',
   };
@@ -47,6 +48,14 @@ export default function TabsLayout() {
           title: 'Search',
           headerTitle: 'Find Land',
           tabBarIcon: ({ focused }) => <TabIcon name="search" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="map"
+        options={{
+          title: 'Map',
+          headerTitle: 'Browse Map',
+          tabBarIcon: ({ focused }) => <TabIcon name="map" focused={focused} />,
         }}
       />
       <Tabs.Screen
