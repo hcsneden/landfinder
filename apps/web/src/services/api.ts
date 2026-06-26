@@ -11,6 +11,9 @@ import type {
   PaginatedResponse,
   SavedParcel,
   SearchResult,
+  HuntingDistrict,
+  StreamGauge,
+  RoadAccess,
 } from '@landfinder/shared'
 import type { BBox } from '../store'
 
@@ -46,10 +49,10 @@ async function apiFetch<T>(
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers })
     if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { message?: string }
+      const body = await res.json().catch(() => ({})) as { error?: { message?: string }; message?: string }
       return {
         success: false,
-        error: { code: String(res.status), message: body.message ?? 'Request failed' },
+        error: { code: String(res.status), message: body.error?.message ?? body.message ?? 'Request failed' },
       }
     }
     return res.json() as Promise<ApiResponse<T>>
@@ -94,6 +97,9 @@ export const parcelApi = {
   getWaterRights: (id: string) => apiFetch<WaterRight[]>(`/parcels/${id}/water-rights`),
   getListings: (id: string) => apiFetch<Listing[]>(`/parcels/${id}/listings`),
   getInsights: (id: string) => apiFetch<ParcelInsight[]>(`/parcels/${id}/insights`),
+  getHuntingDistricts: (id: string) => apiFetch<HuntingDistrict[]>(`/parcels/${id}/hunting-districts`),
+  getStreamGauges: (id: string) => apiFetch<StreamGauge[]>(`/parcels/${id}/stream-gauges`),
+  getRoadAccess: (id: string) => apiFetch<RoadAccess>(`/parcels/${id}/road-access`),
 }
 
 export const userApi = {

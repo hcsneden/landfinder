@@ -5,6 +5,7 @@ import { AuthStack } from '../lib/auth-stack';
 import { DatabaseStack } from '../lib/database-stack';
 import { ApiStack } from '../lib/api-stack';
 import { ScrapingStack } from '../lib/scraping-stack';
+import { WebStack } from '../lib/web-stack';
 
 const app = new cdk.App();
 
@@ -50,6 +51,12 @@ const scrapingStack = new ScrapingStack(app, 'LandFinderScrapingStack', {
   description: 'LandFinder Scraping - ECS Fargate workers and Step Functions',
   database: databaseStack.database,
   vpc: databaseStack.vpc,
+});
+
+// Web hosting stack (S3 + CloudFront)
+const webStack = new WebStack(app, 'LandFinderWebStack', {
+  env,
+  description: 'LandFinder Web - S3 + CloudFront static hosting',
 });
 
 // Add dependencies

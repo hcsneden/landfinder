@@ -1,7 +1,7 @@
 import https from 'https';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { query, queryOne, execute } from '../shared/db';
-import { success, badRequest, serverError } from '../shared/response';
+import { success, badRequest, serverError, error as errorResponse } from '../shared/response';
 import { logger } from '../shared/logger';
 import type { Parcel } from '@landfinder/shared';
 
@@ -9,7 +9,7 @@ const CADASTRAL_URL =
   'https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/Parcels/MapServer/0/query';
 const DNRC_WRQS_URL =
   'https://gis.dnrc.mt.gov/arcgis/rest/services/WRD/WRQS/FeatureServer/6/query';
-const TIMEOUT_MS = 15_000;
+const TIMEOUT_MS = 25_000;
 
 // Montana state GIS servers use intermediate CAs not in the Node.js default bundle
 const gisAgent = new https.Agent({ rejectUnauthorized: false });
@@ -268,7 +268,11 @@ export async function handler(
 
     return success(parcel);
   } catch (err) {
-    logger.error('Parcel lookup error', { error: err instanceof Error ? err.message : String(err) });
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error('Parcel lookup error', { error: msg });
+    if (msg.includes('timed out')) {
+      return errorResponse(503, 'SERVICE_UNAVAILABLE', 'The parcel lookup service is temporarily slow. Please try again.');
+    }
     return serverError('An error occurred during parcel lookup');
   }
 }

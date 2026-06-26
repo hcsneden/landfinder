@@ -10,7 +10,7 @@ import {
   formatFlowRate,
   formatVolume,
 } from '@landfinder/shared'
-import type { WaterRight, ParcelInsight } from '@landfinder/shared'
+import type { WaterRight, ParcelInsight, HuntingDistrict, StreamGauge, RoadAccess, RoadSegment } from '@landfinder/shared'
 
 export function ParcelDetailSheet() {
   const { selectedParcelId, isDetailOpen, searchResults, setDetailOpen } = useStore()
@@ -39,6 +39,33 @@ export function ParcelDetailSheet() {
   const insightsQ = useQuery({
     queryKey: ['insights', selectedParcelId],
     queryFn: () => parcelApi.getInsights(selectedParcelId!).then((r) => {
+      if (!r.success || !r.data) throw new Error(r.error?.message)
+      return r.data
+    }),
+    enabled: !!selectedParcelId,
+  })
+
+  const huntingQ = useQuery({
+    queryKey: ['hunting', selectedParcelId],
+    queryFn: () => parcelApi.getHuntingDistricts(selectedParcelId!).then((r) => {
+      if (!r.success || !r.data) throw new Error(r.error?.message)
+      return r.data
+    }),
+    enabled: !!selectedParcelId,
+  })
+
+  const gaugesQ = useQuery({
+    queryKey: ['gauges', selectedParcelId],
+    queryFn: () => parcelApi.getStreamGauges(selectedParcelId!).then((r) => {
+      if (!r.success || !r.data) throw new Error(r.error?.message)
+      return r.data
+    }),
+    enabled: !!selectedParcelId,
+  })
+
+  const roadQ = useQuery({
+    queryKey: ['road-access', selectedParcelId],
+    queryFn: () => parcelApi.getRoadAccess(selectedParcelId!).then((r) => {
       if (!r.success || !r.data) throw new Error(r.error?.message)
       return r.data
     }),
@@ -161,10 +188,40 @@ export function ParcelDetailSheet() {
           )}
         </div>
 
-        {/* Road & Access */}
+        {/* Hunting Districts */}
+        <div className="detail-section">
+          <div className="section-title">Hunting Districts</div>
+          {huntingQ.isLoading ? (
+            <LoadingSkeleton rows={2} />
+          ) : (huntingQ.data?.length ?? 0) > 0 ? (
+            <HuntingDistrictsSection districts={huntingQ.data!} />
+          ) : (
+            <div className="detail-empty-note">No hunting districts overlap this parcel</div>
+          )}
+        </div>
+
+        {/* Stream Gauges */}
+        <div className="detail-section">
+          <div className="section-title">Nearby Stream Gauges</div>
+          {gaugesQ.isLoading ? (
+            <LoadingSkeleton rows={3} />
+          ) : (gaugesQ.data?.length ?? 0) > 0 ? (
+            gaugesQ.data!.map((g) => <StreamGaugeCard key={g.id} gauge={g} />)
+          ) : (
+            <div className="detail-empty-note">No USGS gauges within 50 miles</div>
+          )}
+        </div>
+
+        {/* Road & Legal Access */}
         <div className="detail-section">
           <div className="section-title">Road & Legal Access</div>
-          <ComingSoon label="Access data" />
+          {roadQ.isLoading ? (
+            <LoadingSkeleton rows={3} />
+          ) : roadQ.data ? (
+            <RoadAccessSection access={roadQ.data} />
+          ) : (
+            <div className="detail-empty-note">Road access data unavailable</div>
+          )}
         </div>
 
         {/* Utility Access */}
@@ -279,6 +336,170 @@ function LoadingSkeleton({ rows }: { rows: number }) {
           style={{ height: 18, borderRadius: 4, width: `${70 + (i % 3) * 10}%` }}
         />
       ))}
+    </div>
+  )
+}
+
+function HuntingDistrictsSection({ districts }: { districts: HuntingDistrict[] }) {
+  const bySpecies: Record<string, string[]> = {}
+  for (const d of districts) {
+    if (!bySpecies[d.species]) bySpecies[d.species] = []
+    bySpecies[d.species]!.push(d.districtNumber)
+  }
+  return (
+    <>
+      {Object.entries(bySpecies).map(([species, numbers]) => (
+        <div key={species} className="detail-row">
+          <span className="detail-row-label" style={{ textTransform: 'capitalize' }}>{species}</span>
+          <span className="detail-row-value">District {numbers.join(', ')}</span>
+        </div>
+      ))}
+    </>
+  )
+}
+
+const MONTH_LABELS = ['J','F','M','A','M','J','J','A','S','O','N','D']
+
+function StreamGaugeCard({ gauge }: { gauge: StreamGauge }) {
+  const avgs = gauge.monthlyAveragesCfs
+  const monthEntries = Array.from({ length: 12 }, (_, i) => avgs[i + 1] ?? 0)
+  const maxCfs = Math.max(...monthEntries, 1)
+  const hasMonthly = monthEntries.some((v) => v > 0)
+  const displayName = gauge.streamName ?? gauge.siteName
+
+  return (
+    <div className="gauge-card">
+      <div className="gauge-card-head">
+        <div className="gauge-card-name-wrap">
+          <div className="gauge-card-name">{displayName}</div>
+          {gauge.streamName && gauge.streamName !== gauge.siteName && (
+            <div className="gauge-card-site">{gauge.siteName}</div>
+          )}
+        </div>
+        <div className="gauge-card-distance">{gauge.distanceMiles} mi</div>
+      </div>
+      {gauge.latestFlowCfs != null && (
+        <div className="gauge-latest">
+          <span className="gauge-latest-label">Current</span>
+          <span className="gauge-latest-value">{gauge.latestFlowCfs.toFixed(1)} cfs</span>
+          {gauge.latestReadingDate && (
+            <span className="gauge-latest-date">as of {formatDate(gauge.latestReadingDate)}</span>
+          )}
+        </div>
+      )}
+      {hasMonthly && (
+        <div className="gauge-bars">
+          {monthEntries.map((cfs, i) => (
+            <div key={i} className="gauge-bar-col">
+              <div className="gauge-bar-track">
+                <div
+                  className="gauge-bar-fill"
+                  style={{ height: `${Math.round((cfs / maxCfs) * 100)}%` }}
+                />
+              </div>
+              <div className="gauge-bar-label">{MONTH_LABELS[i]}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const ROAD_TYPE_LABELS: Record<string, string> = {
+  highway: 'Highway',
+  county:  'County Road',
+  local:   'Local Road',
+  trail:   '4WD Trail',
+  forest:  'Forest Road',
+  blm:     'BLM Road',
+  unknown: 'Road',
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  tiger: 'TIGER/Census',
+  blm:   'BLM',
+  usfs:  'USFS',
+}
+
+function roadTypeClass(type: RoadSegment['type']): string {
+  if (type === 'highway' || type === 'county') return 'road-type-primary'
+  if (type === 'local' || type === 'forest' || type === 'blm') return 'road-type-secondary'
+  return 'road-type-rough'
+}
+
+function RoadAccessSection({ access }: { access: RoadAccess }) {
+  const publicTypes = new Set(['highway', 'county', 'local', 'forest', 'blm'])
+  const publicRoads = access.segments.filter((s) => publicTypes.has(s.type))
+  const roughRoads = access.segments.filter((s) => s.type === 'trail')
+
+  return (
+    <div>
+      {access.hasPublicAccess ? (
+        <div className="road-access-banner road-access-ok">
+          <span className="road-access-icon">✓</span>
+          Public road access detected
+        </div>
+      ) : (
+        <div className="road-access-banner road-access-warn">
+          <span className="road-access-icon">!</span>
+          No public road detected — verify legal access before purchase
+        </div>
+      )}
+
+      {publicRoads.length > 0 && (
+        <div className="road-list">
+          {publicRoads.map((seg, i) => (
+            <div key={i} className="road-item">
+              <div className="road-item-left">
+                <span className={`road-type-pill ${roadTypeClass(seg.type)}`}>
+                  {ROAD_TYPE_LABELS[seg.type] ?? seg.type}
+                </span>
+                <span className="road-item-name">{seg.name ?? 'Unnamed'}</span>
+              </div>
+              <div className="road-item-right">
+                {seg.surfaceType && (
+                  <span className="road-surface">{seg.surfaceType}</span>
+                )}
+                {seg.maintLevel != null && (
+                  <span className="road-maint">maint {seg.maintLevel}</span>
+                )}
+                <span className="road-source">{SOURCE_LABELS[seg.source] ?? seg.source}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {roughRoads.length > 0 && (
+        <div className="road-list road-list-rough">
+          <div className="road-list-subhead">Rough / High-Clearance Only</div>
+          {roughRoads.map((seg, i) => (
+            <div key={i} className="road-item">
+              <div className="road-item-left">
+                <span className={`road-type-pill ${roadTypeClass(seg.type)}`}>
+                  {ROAD_TYPE_LABELS[seg.type] ?? seg.type}
+                </span>
+                <span className="road-item-name">{seg.name ?? 'Unnamed'}</span>
+              </div>
+              <div className="road-item-right">
+                {seg.surfaceType && <span className="road-surface">{seg.surfaceType}</span>}
+                <span className="road-source">{SOURCE_LABELS[seg.source] ?? seg.source}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {access.segments.length === 0 && (
+        <div className="detail-empty-note" style={{ marginTop: 8 }}>
+          No roads found within 150 m of this parcel
+        </div>
+      )}
+
+      <div className="road-access-note">
+        Easements and private access rights require a title search — not reflected above.
+      </div>
     </div>
   )
 }

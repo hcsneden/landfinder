@@ -184,6 +184,58 @@ export class ScrapingStack extends cdk.Stack {
       },
     });
 
+    // Hunting Districts Scraper Task Definition (run weekly — districts rarely change)
+    const huntingDistrictsTaskDef = new ecs.FargateTaskDefinition(
+      this,
+      'HuntingDistrictsScraperTask',
+      {
+        family: 'landfinder-hunting-districts-scraper',
+        memoryLimitMiB: 1024,
+        cpu: 512,
+        executionRole: executionRole,
+        taskRole: taskRole,
+      }
+    );
+
+    huntingDistrictsTaskDef.addContainer('HuntingDistrictsScraper', {
+      containerName: 'hunting-districts-scraper',
+      image: ecs.ContainerImage.fromEcrRepository(scraperRepo, 'hunting-districts-latest'),
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: 'hunting-districts-scraper',
+      }),
+      environment: {
+        DATABASE_SECRET_ARN: database.secret!.secretArn,
+        S3_BUCKET: this.scrapingBucket.bucketName,
+        AWS_REGION: cdk.Aws.REGION,
+      },
+    });
+
+    // Stream Gauges Scraper Task Definition (run weekly — gauge locations rarely change)
+    const streamGaugesTaskDef = new ecs.FargateTaskDefinition(
+      this,
+      'StreamGaugesScraperTask',
+      {
+        family: 'landfinder-stream-gauges-scraper',
+        memoryLimitMiB: 1024,
+        cpu: 512,
+        executionRole: executionRole,
+        taskRole: taskRole,
+      }
+    );
+
+    streamGaugesTaskDef.addContainer('StreamGaugesScraper', {
+      containerName: 'stream-gauges-scraper',
+      image: ecs.ContainerImage.fromEcrRepository(scraperRepo, 'stream-gauges-latest'),
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: 'stream-gauges-scraper',
+      }),
+      environment: {
+        DATABASE_SECRET_ARN: database.secret!.secretArn,
+        S3_BUCKET: this.scrapingBucket.bucketName,
+        AWS_REGION: cdk.Aws.REGION,
+      },
+    });
+
     // Step Functions state machine for orchestrating scraping
     const runCadastralScraper = new sfn_tasks.EcsRunTask(this, 'RunCadastralScraper', {
       integrationPattern: stepfunctions.IntegrationPattern.RUN_JOB,
@@ -219,6 +271,26 @@ export class ScrapingStack extends cdk.Stack {
       },
     });
 
+    const runHuntingDistrictsScraper = new sfn_tasks.EcsRunTask(this, 'RunHuntingDistrictsScraper', {
+      integrationPattern: stepfunctions.IntegrationPattern.RUN_JOB,
+      cluster: this.cluster,
+      taskDefinition: huntingDistrictsTaskDef,
+      launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
+      subnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      },
+    });
+
+    const runStreamGaugesScraper = new sfn_tasks.EcsRunTask(this, 'RunStreamGaugesScraper', {
+      integrationPattern: stepfunctions.IntegrationPattern.RUN_JOB,
+      cluster: this.cluster,
+      taskDefinition: streamGaugesTaskDef,
+      launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
+      subnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      },
+    });
+
     // Define the workflow
     const parallelScrapers = new stepfunctions.Parallel(this, 'ParallelScrapers', {
       resultPath: '$.scrapingResults',
@@ -227,6 +299,8 @@ export class ScrapingStack extends cdk.Stack {
     parallelScrapers.branch(runCadastralScraper);
     parallelScrapers.branch(runWaterRightsScraper);
     parallelScrapers.branch(runListingsScraper);
+    parallelScrapers.branch(runHuntingDistrictsScraper);
+    parallelScrapers.branch(runStreamGaugesScraper);
 
     const scrapingComplete = new stepfunctions.Succeed(this, 'ScrapingComplete');
 

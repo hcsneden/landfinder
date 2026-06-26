@@ -7,7 +7,9 @@
     "typecheck": "tsc --noEmit",
     "cadastral": "ts-node cadastral/index.ts",
     "water-rights": "ts-node water-rights/index.ts",
-    "listings": "ts-node listings/index.ts"
+    "listings": "ts-node listings/index.ts",
+    "hunting-districts": "ts-node hunting-districts/index.ts",
+    "stream-gauges": "ts-node stream-gauges/index.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.700.0",

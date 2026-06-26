@@ -87,6 +87,55 @@ export interface SavedParcel {
   savedAt: string;
 }
 
+export interface HuntingDistrict {
+  id: string;
+  districtNumber: string;
+  species: string;
+  rawData: Record<string, unknown>;
+}
+
+export interface StreamGaugeReading {
+  date: string;
+  meanFlowCfs: number;
+}
+
+export type RoadType =
+  | 'highway'   // Interstate, US/state highway (MTFCC S1100)
+  | 'county'    // County/secondary road (MTFCC S1200)
+  | 'local'     // Local/neighborhood road (MTFCC S1400)
+  | 'trail'     // 4WD vehicular trail (MTFCC S1500 or USFS maint level 1-2)
+  | 'forest'    // USFS managed road (maint level 3-5)
+  | 'blm'       // BLM managed road
+  | 'unknown';
+
+export interface RoadSegment {
+  name: string | null;
+  type: RoadType;
+  source: 'tiger' | 'blm' | 'usfs';
+  surfaceType: string | null;
+  maintLevel: number | null;  // USFS maintenance level 1–5; null for TIGER/BLM
+}
+
+export interface RoadAccess {
+  parcelId: string;
+  segments: RoadSegment[];
+  hasPublicAccess: boolean;
+  fetchedAt: string;
+}
+
+export interface StreamGauge {
+  id: string;
+  siteNumber: string;
+  siteName: string;
+  streamName: string | null;
+  distanceMiles: number;
+  latestFlowCfs: number | null;
+  latestReadingDate: string | null;
+  readings: StreamGaugeReading[];
+  // Keyed by month number (1-12) -> average CFS for that calendar month across all cached readings
+  monthlyAveragesCfs: Record<number, number>;
+}
+
 // Search types
 export interface SearchCriteria {
   state: string;

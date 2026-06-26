@@ -290,6 +290,9 @@ export class ApiStack extends cdk.Stack {
     parcelByIdResource.addResource('water-rights').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
     parcelByIdResource.addResource('listings').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
     parcelByIdResource.addResource('insights').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('hunting-districts').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('stream-gauges').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('road-access').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
 
     const userResource = this.api.root.addResource('user');
     const savedResource = userResource.addResource('saved');

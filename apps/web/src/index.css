@@ -910,6 +910,274 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   50%       { opacity: 0.5; }
 }
 
+/* ─── Detail empty note ──────────────────────────────────────────────────── */
+
+.detail-empty-note {
+  font-size: 12px;
+  color: var(--ink-4);
+  padding: 2px 0;
+}
+
+/* ─── Hunting Districts ──────────────────────────────────────────────────── */
+
+/* Reuses .detail-row / .detail-row-label / .detail-row-value — no extra rules needed */
+
+/* ─── Stream Gauge Cards ─────────────────────────────────────────────────── */
+
+.gauge-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.gauge-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 9px 12px;
+  background: var(--cream-mid);
+  border-bottom: 1px solid var(--border);
+}
+
+.gauge-card-name-wrap { flex: 1; min-width: 0; }
+
+.gauge-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gauge-card-site {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gauge-card-distance {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--water);
+  flex-shrink: 0;
+  margin-left: 10px;
+}
+
+.gauge-latest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--cream-dark);
+}
+
+.gauge-latest-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-4);
+  flex-shrink: 0;
+}
+
+.gauge-latest-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--water);
+}
+
+.gauge-latest-date {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  margin-left: auto;
+}
+
+.gauge-bars {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px 6px;
+  height: 52px;
+}
+
+.gauge-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  height: 100%;
+}
+
+.gauge-bar-track {
+  flex: 1;
+  width: 100%;
+  background: var(--cream-mid);
+  border-radius: 2px 2px 0 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+
+.gauge-bar-fill {
+  width: 100%;
+  background: var(--water);
+  opacity: 0.65;
+  min-height: 2px;
+  transition: height 0.3s ease;
+}
+
+.gauge-bar-label {
+  font-size: 7px;
+  font-family: var(--font-mono);
+  color: var(--ink-4);
+  line-height: 1;
+}
+
+/* ─── Road Access ────────────────────────────────────────────────────────── */
+
+.road-access-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.road-access-ok {
+  background: #D1EDCE;
+  color: #1F5C1B;
+  border: 1px solid rgba(31,92,27,0.2);
+}
+
+.road-access-warn {
+  background: var(--amber-pale);
+  color: var(--amber);
+  border: 1px solid rgba(154,107,20,0.25);
+}
+
+.road-access-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: currentColor;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+  /* The icon inherits parent color for background, text is white */
+  filter: none;
+}
+
+/* Make the checkmark/bang white inside colored circle */
+.road-access-ok   .road-access-icon { background: #1F5C1B; color: white; }
+.road-access-warn .road-access-icon { background: var(--amber); color: white; }
+
+.road-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.road-list-rough { margin-top: 4px; }
+
+.road-list-subhead {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-4);
+  margin-bottom: 4px;
+  margin-top: 4px;
+}
+
+.road-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+.road-item-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.road-item-name {
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.road-type-pill {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.road-type-primary  { background: var(--pine-pale);  color: var(--pine); }
+.road-type-secondary { background: var(--water-pale); color: var(--water); }
+.road-type-rough    { background: var(--cream-dark);  color: var(--ink-3); }
+
+.road-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.road-surface,
+.road-maint,
+.road-source {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.road-surface { text-transform: capitalize; }
+
+.road-access-note {
+  font-size: 10px;
+  color: var(--ink-4);
+  font-style: italic;
+  line-height: 1.4;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cream-dark);
+}
+
 /* ─── Coming Soon ────────────────────────────────────────────────────────── */
 
 .coming-soon-card {
