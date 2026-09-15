@@ -10,8 +10,8 @@ import (
 
 // Endpoint URLs for the Montana state GIS services.
 const (
-	cadastralURL  = "https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/Parcels/MapServer/0/query"
-	msdiAddressURL = "https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaStructuresAddresses/MapServer/0/query"
+	cadastralURL   = "https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1/query"
+	msdiAddressURL = "https://gisservice.mt.gov/arcgis/rest/services/msdi_structures_addresses_map_v1/MapServer/0/query"
 )
 
 const cadastralFields = "PARCELID,CountyName,AddressLine1,CityStateZip,TotalAcres,GISAcres,TotalBuildingValue,PropType"
@@ -47,10 +47,10 @@ func (s *Service) cadastralByQuery(ctx context.Context, q string) (*CadastralFea
 func (s *Service) cadastralByPoint(ctx context.Context, ll LatLng) (*CadastralFeature, error) {
 	geom, _ := json.Marshal(map[string]float64{"x": ll.Lng, "y": ll.Lat})
 	return s.cadastralQuery(ctx, url.Values{
-		"geometry":     {string(geom)},
-		"geometryType": {"esriGeometryPoint"},
-		"spatialRel":   {"esriSpatialRelIntersects"},
-		"inSR":         {"4326"},
+		"geometry":          {string(geom)},
+		"geometryType":      {"esriGeometryPoint"},
+		"spatialRel":        {"esriSpatialRelIntersects"},
+		"inSR":              {"4326"},
 		"resultRecordCount": {"1"},
 	})
 }

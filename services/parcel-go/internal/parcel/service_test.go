@@ -78,7 +78,7 @@ func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 func TestLookup_CadastralMatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.Contains(r.URL.Path, "/Parcels/"):
+		case strings.Contains(r.URL.Path, "/msdi_cadastral_map_v1/"):
 			io.WriteString(w, `{"features":[{"attributes":{"PARCELID":"49-1234","CountyName":"Gallatin","TotalAcres":40.5},"geometry":{"rings":[[[ -111.0,45.0],[-111.0,45.1],[-110.9,45.1],[-110.9,45.0],[-111.0,45.0]]]}}]}`)
 		case strings.Contains(r.URL.Path, "/WRD/WRQS/"):
 			io.WriteString(w, `{"features":[{"attributes":{"WR_NUMBER":"76H 100","SOURCE_TYPES":"GROUNDWATER","WR_STATUS":"ACTIVE"}}]}`)

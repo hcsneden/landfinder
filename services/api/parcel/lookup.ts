@@ -7,7 +7,7 @@ import { logger } from '../shared/logger';
 import type { Parcel, ParcelCandidate } from '@landfinder/shared';
 
 const CADASTRAL_URL =
-  'https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/Parcels/MapServer/0/query';
+  'https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1/query';
 // Layer 6: Geocodes — exact parcel-geocode linkage
 const DNRC_WRQS_GEOCODE_URL =
   'https://gis.dnrc.mt.gov/arcgis/rest/services/WRD/WRQS/FeatureServer/6/query';
@@ -20,7 +20,7 @@ const CENSUS_GEOCODER_STRUCTURED_URL =
   'https://geocoding.geo.census.gov/geocoder/locations/address';
 // Montana E911 address points — has house-number-level records with direct ParcelID links
 const MSDI_ADDRESS_URL =
-  'https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/MontanaStructuresAddresses/MapServer/0/query';
+  'https://gisservice.mt.gov/arcgis/rest/services/msdi_structures_addresses_map_v1/MapServer/0/query';
 const TIMEOUT_MS = 25_000;
 
 const WRQS_GEOCODE_FIELDS = 'WR_NUMBER,WR_STATUS,ENF_PRTY_DT_DATE,SOURCE_NAMES,SOURCE_TYPES,MAX_FLOW_GPM,MAX_VOL,GEOCD';

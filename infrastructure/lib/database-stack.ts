@@ -83,7 +83,7 @@ export class DatabaseStack extends cdk.Stack {
       multiAz: false, // MVP: single AZ
       publiclyAccessible: false,
       backupRetention: cdk.Duration.days(7),
-      deletionProtection: true,
+      deletionProtection: false, // off so the cleanup deploy can remove it
       removalPolicy: cdk.RemovalPolicy.SNAPSHOT,
     });
 
