@@ -77,9 +77,9 @@ async function saveParcel(
 
   const sql = `
     INSERT INTO user_saved_parcels (user_id, parcel_id, notes, saved_at)
-    VALUES ($1, $2, $3, $4)
+    VALUES ($1, $2::uuid, $3, $4::timestamptz)
     ON CONFLICT (user_id, parcel_id)
-    DO UPDATE SET notes = $3, saved_at = $4
+    DO UPDATE SET notes = $3, saved_at = $4::timestamptz
     RETURNING user_id, parcel_id, notes, saved_at
   `;
 
@@ -96,7 +96,7 @@ async function saveParcel(
     return serverError('Failed to save parcel');
   }
 
-  const row = rows[0];
+  const row = rows[0]!;
   const savedParcel: SavedParcel = {
     userId: row.user_id,
     parcelId: row.parcel_id,
@@ -123,7 +123,7 @@ async function removeSavedParcel(
 
   const sql = `
     DELETE FROM user_saved_parcels
-    WHERE user_id = $1 AND parcel_id = $2
+    WHERE user_id = $1 AND parcel_id = $2::uuid
   `;
 
   const rowCount = await execute(sql, [userId, parcelId]);

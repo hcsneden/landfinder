@@ -42,7 +42,7 @@ function parseRdb(text: string): Record<string, string>[] {
 
   if (dataLines.length < 3) return [];
 
-  const headers = dataLines[0].split('\t').map((h) => h.trim());
+  const headers = dataLines[0]!.split('\t').map((h) => h.trim());
   // dataLines[1] = type codes (e.g. "5s", "15s") — skip
   const rows = dataLines.slice(2);
 
@@ -65,7 +65,7 @@ function extractStreamName(stationName: string): string | null {
   const match = stationName.match(/^(.+?)\s+(?:NEAR|AT|ABOVE|BELOW|NR|BL|AB)\s+/i);
   if (!match) return null;
 
-  return match[1]
+  return match[1]!
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim();
@@ -74,8 +74,8 @@ function extractStreamName(stationName: string): string | null {
 async function upsertGauge(row: Record<string, string>): Promise<void> {
   const siteNo = row['site_no'];
   const siteName = row['station_nm'];
-  const lat = parseFloat(row['dec_lat_va']);
-  const lng = parseFloat(row['dec_long_va']);
+  const lat = parseFloat(row['dec_lat_va'] ?? '');
+  const lng = parseFloat(row['dec_long_va'] ?? '');
   const countyCd = row['county_cd'] || null;
   const hucCode = row['huc_cd'] || null;
 

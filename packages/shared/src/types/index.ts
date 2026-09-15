@@ -1,5 +1,12 @@
 // Core data types for LandFinder
 
+export interface BBox {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+}
+
 export interface Parcel {
   id: string;
   state: string;
@@ -13,6 +20,8 @@ export interface Parcel {
     longitude: number;
   } | null;
   boundary: GeoJSONPolygon | null;
+  buildingValue: number | null;
+  propType: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -136,6 +145,14 @@ export interface StreamGauge {
   monthlyAveragesCfs: Record<number, number>;
 }
 
+export interface ConservationEasement {
+  holderName: string | null;
+  purpose: string | null;
+  dateRecorded: string | null;
+  restrictions: string | null;
+  acreage: number | null;
+}
+
 // Search types
 export interface SearchCriteria {
   state: string;
@@ -146,6 +163,7 @@ export interface SearchCriteria {
   maxPrice?: number;
   waterRightsRequired?: boolean;
   propertyType?: PropertyType[];
+  bbox?: BBox;
 }
 
 export type PropertyType =
@@ -172,6 +190,36 @@ export interface SearchJob {
   completedAt: string | null;
 }
 
+export interface ParcelCandidate {
+  parcelId: string;
+  address: string | null;
+  acreage: number | null;
+  county: string | null;
+  subdivision: string | null;
+  totalValue: number | null;
+  // Only populated for the first ~10 candidates — null means "not checked", not "not for sale"
+  forSale: boolean | null;
+  listingSummary: string | null;
+}
+
+export type ListingStatusConfidence = 'high' | 'medium' | 'low';
+
+export interface ListingStatus {
+  parcelId: string;
+  forSale: boolean;
+  confidence: ListingStatusConfidence;
+  price: number | null;
+  listingUrl: string | null;
+  source: string | null;
+  summary: string;
+  fetchedAt: string;
+}
+
+export interface ParcelCandidates {
+  candidates: ParcelCandidate[];
+  roadName: string;
+}
+
 // API response types
 export interface ApiResponse<T> {
   success: boolean;
@@ -188,6 +236,107 @@ export interface PaginatedResponse<T> {
   page: number;
   pageSize: number;
   hasMore: boolean;
+}
+
+export interface BroadbandProvider {
+  providerName: string;
+  techType: string;
+  maxDownloadSpeed: number | null;
+  maxUploadSpeed: number | null;
+}
+
+export interface ElectricAccess {
+  hasNearbyLine: boolean;
+  nearestLineDistanceMiles: number | null;
+  voltageClass: string | null;
+  type: string | null;
+  owner: string | null;
+  serviceTerritory: {
+    utilityName: string;
+    utilityType: string | null;
+  } | null;
+}
+
+export interface UtilityAccess {
+  parcelId: string;
+  electric: ElectricAccess | null;
+  broadband: BroadbandProvider[];
+  fetchedAt: string;
+}
+
+// Soil (NRCS SSURGO via Soil Data Access) --------------------------------
+
+export interface SoilMapUnit {
+  mukey: string;
+  name: string | null;            // map unit name, e.g. "Amsterdam silt loam, 2 to 4 percent slopes"
+  acresInParcel: number | null;   // acreage of this map unit inside the parcel
+  percentOfParcel: number | null; // share of parcel covered, 0-100
+  farmlandClass: string | null;   // e.g. "All areas are prime farmland", "Not prime farmland"
+  drainageClass: string | null;   // dominant component drainage, e.g. "Well drained"
+  taxonomicClass: string | null;  // dominant component taxonomy (taxclname)
+  slopePercent: number | null;    // representative slope of dominant component
+  capabilityClass: string | null; // non-irrigated land capability class, e.g. "3e"
+}
+
+export interface SoilInfo {
+  parcelId: string;
+  mapUnits: SoilMapUnit[];
+  // Convenience roll-ups computed from the map units:
+  primeFarmlandPercent: number | null; // % of parcel that is prime / prime-if-* farmland
+  dominantMapUnitName: string | null;  // name of the largest map unit by area
+  fetchedAt: string;
+}
+
+// Groundwater / wells (MBMG GWIC) ----------------------------------------
+
+export interface WellLog {
+  gwicId: string;
+  siteName: string | null;
+  distanceMiles: number;
+  totalDepthFt: number | null;      // total drilled depth
+  staticWaterLevelFt: number | null; // static water level below ground surface
+  yieldGpm: number | null;           // reported yield, gallons per minute
+  aquifer: string | null;
+  wellUse: string | null;            // e.g. "domestic", "stock", "irrigation"
+  dateCompleted: string | null;
+}
+
+export interface GroundwaterInfo {
+  parcelId: string;
+  searchRadiusMiles: number;
+  wells: WellLog[];
+  // Roll-ups across the nearby wells, useful as a "can I get water here" signal:
+  wellCount: number;
+  medianDepthFt: number | null;
+  medianYieldGpm: number | null;
+  medianStaticWaterLevelFt: number | null;
+  fetchedAt: string;
+}
+
+export type FloodRiskLevel = 'high' | 'moderate' | 'minimal' | 'undetermined';
+
+export interface FloodZone {
+  zone: string;
+  subtype: string | null;
+  isSpecialFloodHazardArea: boolean;
+  riskLevel: FloodRiskLevel;
+}
+
+export type WildfireRiskRating = 'Very High' | 'High' | 'Medium' | 'Low' | 'Very Low';
+
+export interface MineSite {
+  name: string | null;
+  depositType: string | null;
+  workType: string | null;
+  operType: string | null;
+}
+
+export interface EnvironmentalRisk {
+  parcelId: string;
+  floodZones: FloodZone[];
+  wildfireRisk: WildfireRiskRating | null;
+  mineSites: MineSite[];
+  fetchedAt: string;
 }
 
 // Auth types

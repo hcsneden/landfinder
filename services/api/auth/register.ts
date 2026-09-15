@@ -119,7 +119,7 @@ export async function handler(
     }
 
     const tokenParts = IdToken.split('.');
-    const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString()) as { sub?: string };
+    const payload = JSON.parse(Buffer.from(tokenParts[1]!, 'base64').toString()) as { sub?: string };
     const cognitoSub = payload.sub;
 
     if (!cognitoSub) {
@@ -139,6 +139,7 @@ export async function handler(
 
     const tokens: AuthTokens = {
       accessToken: AccessToken,
+      idToken: IdToken,
       refreshToken: RefreshToken,
       expiresIn: ExpiresIn ?? 3600,
     };

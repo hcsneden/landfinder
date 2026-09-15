@@ -5,7 +5,7 @@ import { AuthPage } from './pages/AuthPage'
 import { MapPage } from './pages/MapPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const tokens = useStore((s) => s.tokens)
+  const tokens = useStore((state) => state.tokens)
   if (!tokens) return <Navigate to="/auth" replace />
   return <>{children}</>
 }

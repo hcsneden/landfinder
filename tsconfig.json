@@ -14,5 +14,7 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true
   },
-  "exclude": ["node_modules", "dist", ".expo"]
+  "comment": "Shared base config for Node/backend workspaces (packages/shared, services/*). Each workspace has its own tsconfig that extends this with the right `include`. The web and mobile apps have standalone configs. Run `npm run typecheck` to check every workspace.",
+  "files": [],
+  "exclude": ["node_modules", "dist", ".expo", "cdk.out", "build"]
 }

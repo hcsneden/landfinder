@@ -10,11 +10,7 @@
  */
 
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from '@aws-sdk/client-bedrock-runtime';
-import { query, closePool } from '../shared/db';
+import { query, execute, closePool } from '../shared/db';
 
 const WRQS_FEATURE_SERVER =
   'https://gis.dnrc.mt.gov/arcgis/rest/services/WRD/WRQS/FeatureServer/6/query';
@@ -31,7 +27,7 @@ interface WaterRightData {
   volume: number | null;
   maxAcres: number | null;
   priorityDate: string | null;
-  status: 'active' | 'inactive' | 'pending';
+  status: 'active' | 'inactive' | 'pending' | 'unknown';
   geocode: string;
   rawData: Record<string, unknown>;
 }
@@ -52,7 +48,6 @@ interface FeatureAttributes {
 }
 
 const s3Client = new S3Client({});
-const bedrockClient = new BedrockRuntimeClient({});
 
 async function fetchWithTimeout(url: string): Promise<Response> {
   const controller = new AbortController();
@@ -139,16 +134,16 @@ function parsePriorityDate(
   fallbackChar: string | null
 ): string | null {
   if (epochMs != null) {
-    return new Date(epochMs).toISOString().split('T')[0];
+    return new Date(epochMs).toISOString().split('T')[0] ?? null;
   }
   if (fallbackChar) {
     const d = new Date(fallbackChar);
-    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] ?? null;
   }
   return null;
 }
 
-function parseStatus(status: string): 'active' | 'inactive' | 'pending' {
+function parseStatus(status: string): 'active' | 'inactive' | 'pending' | 'unknown' {
   const s = status.toUpperCase();
   if (s.includes('ACTIVE') && !s.includes('IN')) return 'active';
   if (
@@ -160,49 +155,40 @@ function parseStatus(status: string): 'active' | 'inactive' | 'pending' {
     return 'inactive';
   }
   if (s.includes('PENDING') || s.includes('APPLICATION')) return 'pending';
-  return 'active';
+  return 'unknown';
 }
 
 async function saveWaterRight(
   parcelId: string,
   waterRight: WaterRightData
 ): Promise<void> {
-  const sql = `
-    INSERT INTO water_rights (
-      parcel_id,
-      water_right_number,
-      water_source,
-      water_type,
-      flow_rate,
-      volume,
-      priority_date,
-      status,
-      raw_data,
-      created_at
+  await execute(
+    `INSERT INTO water_rights (
+      parcel_id, water_right_number, water_source, water_type,
+      flow_rate, volume, priority_date, status, raw_data, created_at
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
     ON CONFLICT (parcel_id, water_right_number)
     DO UPDATE SET
-      water_source = EXCLUDED.water_source,
-      water_type = EXCLUDED.water_type,
-      flow_rate = EXCLUDED.flow_rate,
-      volume = EXCLUDED.volume,
+      water_source  = EXCLUDED.water_source,
+      water_type    = EXCLUDED.water_type,
+      flow_rate     = EXCLUDED.flow_rate,
+      volume        = EXCLUDED.volume,
       priority_date = EXCLUDED.priority_date,
-      status = EXCLUDED.status,
-      raw_data = EXCLUDED.raw_data
-  `;
-
-  await query(sql, [
-    parcelId,
-    waterRight.waterRightNumber,
-    waterRight.waterSource,
-    waterRight.waterType,
-    waterRight.flowRateGpm,
-    waterRight.volume,
-    waterRight.priorityDate,
-    waterRight.status,
-    JSON.stringify(waterRight.rawData),
-  ]);
+      status        = EXCLUDED.status,
+      raw_data      = EXCLUDED.raw_data`,
+    [
+      parcelId,
+      waterRight.waterRightNumber,
+      waterRight.waterSource,
+      waterRight.waterType,
+      waterRight.flowRateGpm,
+      waterRight.volume,
+      waterRight.priorityDate,
+      waterRight.status,
+      JSON.stringify(waterRight.rawData),
+    ]
+  );
 }
 
 async function fetchWaterRightsForParcels(): Promise<void> {
@@ -292,43 +278,6 @@ async function fetchWaterRightsForParcels(): Promise<void> {
   console.log('Water rights fetch complete:', summary);
 }
 
-async function analyzeWaterRightsWithAI(parcelId: string): Promise<string> {
-  const waterRights = await query(
-    'SELECT * FROM water_rights WHERE parcel_id = $1',
-    [parcelId]
-  );
-
-  if (waterRights.length === 0) {
-    return 'No water rights found for this parcel.';
-  }
-
-  const prompt = `Analyze the following water rights data for a Montana property and provide a clear summary for a prospective land buyer. Include:
-1. Total water allocation (flow rate and volume)
-2. Priority date analysis (how senior are these rights?)
-3. Water source types
-4. Any potential concerns or benefits
-5. Recommendations for due diligence
-
-Water Rights Data:
-${JSON.stringify(waterRights, null, 2)}
-
-Provide a concise, helpful analysis:`;
-
-  const command = new InvokeModelCommand({
-    modelId: 'anthropic.claude-sonnet-4-5-20250929-v1:0',
-    body: JSON.stringify({
-      anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-    contentType: 'application/json',
-  });
-
-  const response = await bedrockClient.send(command);
-  const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-  return responseBody.content[0].text;
-}
-
 // Main entry point
 async function main() {
   try {
@@ -343,4 +292,4 @@ main().catch((err) => {
   process.exit(1);
 });
 
-export { fetchWaterRightsForParcels, analyzeWaterRightsWithAI, WaterRightData };
+export { fetchWaterRightsForParcels, WaterRightData };

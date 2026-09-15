@@ -53,7 +53,7 @@ export async function getPool(): Promise<Pool> {
     database: creds.dbname,
     max: 10,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: 25000,
     ssl: {
       rejectUnauthorized: false,
     },
@@ -130,7 +130,7 @@ export async function upsertParcel(parcel: {
   `;
 
   const result = await query<{ id: string }>(sql, params);
-  return result[0].id;
+  return result[0]!.id;
 }
 
 export async function closePool(): Promise<void> {

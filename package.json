@@ -17,11 +17,17 @@
     "mobile:web": "npm run web --workspace=apps/mobile",
     "infra:deploy": "npm run deploy --workspace=infrastructure",
     "infra:synth": "npm run synth --workspace=infrastructure",
-    "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck -w packages/shared -w services/api -w services/scrapers -w apps/web -w infrastructure",
+    "typecheck:mobile": "npm run typecheck -w apps/mobile",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "overrides": {
+    "@types/react": "19.2.17"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@types/react": "19.2.17",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
     "eslint": "^8.56.0",

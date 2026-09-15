@@ -1,38 +1,19 @@
-import { useState, FormEvent } from 'react'
+import { useActionState, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Input, Typography } from '@hcsneden/design-library'
 import { authApi } from '../services/api'
 import { useStore } from '../store'
 
+const FEATURES = [
+  'DNRC water rights with priority dates',
+  'Landlocked and access warnings',
+  'Conservation easement status',
+  'Wildfire risk and mining history',
+  'Interactive GIS layer overlays',
+]
+
 export function AuthPage() {
-  const navigate = useNavigate()
-  const setAuth = useStore((s) => s.setAuth)
-
   const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-
-    const res = mode === 'login'
-      ? await authApi.login(email, password)
-      : await authApi.register(email, password)
-
-    setLoading(false)
-
-    if (!res.success || !res.data) {
-      setError(res.error?.message ?? 'Something went wrong')
-      return
-    }
-
-    setAuth(res.data.user, res.data.tokens)
-    navigate('/')
-  }
 
   return (
     <div className="auth-page">
@@ -47,13 +28,7 @@ export function AuthPage() {
             Water rights, road access, buildability, and environmental risk — in one place.
           </p>
           <div className="auth-aside-features">
-            {[
-              'DNRC water rights with priority dates',
-              'Landlocked and access warnings',
-              'Conservation easement status',
-              'Wildfire risk and mining history',
-              'Interactive GIS layer overlays',
-            ].map((f) => (
+            {FEATURES.map((f) => (
               <div key={f} className="auth-feature">
                 <div className="auth-feature-dot" />
                 {f}
@@ -75,48 +50,71 @@ export function AuthPage() {
           </Typography>
         </div>
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {error && <div className="auth-error">{error}</div>}
-
-          <Input
-            label="Email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            required
-            autoFocus
-          />
-
-          <Input
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={mode === 'register' ? 'At least 8 characters' : ''}
-            required
-            minLength={mode === 'register' ? 8 : undefined}
-          />
-
-          <Button type="submit" variant="primary" size="lg" disabled={loading}>
-            {loading && <span className="spinner" />}
-            {loading
-              ? mode === 'login' ? 'Signing in…' : 'Creating account…'
-              : mode === 'login' ? 'Sign in' : 'Create account'}
-          </Button>
-        </form>
+        {/* key remounts AuthForm on mode switch, resetting action state and clearing errors */}
+        <AuthForm key={mode} mode={mode} />
 
         <p className="auth-switch">
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null) }}
+            onClick={() => setMode((currentMode) => (currentMode === "login" ? "register" : "login"))}
           >
             {mode === 'login' ? 'Create one' : 'Sign in'}
           </Button>
         </p>
       </div>
     </div>
+  )
+}
+
+function AuthForm({ mode }: { mode: 'login' | 'register' }) {
+  const navigate = useNavigate()
+  const setAuth = useStore((state) => state.setAuth)
+
+  const [error, formAction, isPending] = useActionState(
+    async (_prev: string | null, formData: FormData) => {
+      const email = formData.get('email') as string
+      const password = formData.get('password') as string
+      const res = mode === 'login'
+        ? await authApi.login(email, password)
+        : await authApi.register(email, password)
+      if (!res.success || !res.data) return res.error?.message ?? 'Something went wrong'
+      setAuth(res.data.user, res.data.tokens)
+      navigate('/')
+      return null
+    },
+    null,
+  )
+
+  return (
+    <form className="auth-form" action={formAction}>
+      {!isPending && error && <div className="auth-error">{error}</div>}
+
+      <Input
+        label="Email"
+        type="email"
+        name="email"
+        placeholder="you@example.com"
+        required
+        autoFocus
+      />
+
+      <Input
+        label="Password"
+        type="password"
+        name="password"
+        placeholder={mode === 'register' ? 'At least 8 characters' : ''}
+        required
+        minLength={mode === 'register' ? 8 : undefined}
+      />
+
+      <Button type="submit" variant="primary" size="lg" disabled={isPending}>
+        {isPending && <span className="spinner" />}
+        {isPending
+          ? mode === 'login' ? 'Signing in…' : 'Creating account…'
+          : mode === 'login' ? 'Sign in' : 'Create account'}
+      </Button>
+    </form>
   )
 }

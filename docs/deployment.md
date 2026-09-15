@@ -27,20 +27,7 @@ You should see your account ID and user ARN.
 
 ---
 
-## Step 2 — Enable Bedrock model access
-
-This is a one-time manual step in the AWS Console — CDK cannot do this for you.
-
-1. Go to **AWS Console → Amazon Bedrock → Model access** (make sure you are in `us-west-2`)
-2. Click **Manage model access**
-3. Check **Claude 3.5 Sonnet** under the Anthropic section
-4. Click **Save changes** — approval is usually instant
-
-If you skip this step, the `/parcels/{id}/insights` endpoint will fail with an access error when it tries to call Claude.
-
----
-
-## Step 3 — Bootstrap CDK
+## Step 2 — Bootstrap CDK
 
 CDK needs to create a small set of resources in your account the first time it runs (an S3 bucket for assets and some IAM roles). This is a one-time step per account/region.
 
@@ -54,7 +41,7 @@ Replace `YOUR_ACCOUNT_ID` with your 12-digit AWS account ID (visible in the outp
 
 ---
 
-## Step 4 — Preview the changes
+## Step 3 — Preview the changes
 
 Before deploying, you can see exactly what CDK will create:
 
@@ -64,7 +51,7 @@ npm run diff
 
 ---
 
-## Step 5 — Deploy all stacks
+## Step 4 — Deploy all stacks
 
 ```bash
 npm run deploy
@@ -93,7 +80,7 @@ npm run deploy:api
 
 ---
 
-## Step 6 — Apply the database schema
+## Step 5 — Apply the database schema
 
 The RDS instance is in a private subnet with no public internet access. To run the schema migration you need to connect through AWS Systems Manager (no bastion host required).
 
@@ -123,7 +110,7 @@ psql -h localhost -p 5433 -U landfinder_admin -d landfinder \
 
 ---
 
-## Step 7 — Configure the mobile app
+## Step 6 — Configure the mobile app
 
 After deployment, update the mobile app with the values from CDK output:
 
@@ -135,7 +122,7 @@ After deployment, update the mobile app with the values from CDK output:
 
 ---
 
-## Step 8 — Build and push scraper images (when ready)
+## Step 7 — Build and push scraper images (when ready)
 
 The scraping infrastructure (ECS, Step Functions) is deployed, but the container images don't exist yet. When the scrapers are ready to run:
 

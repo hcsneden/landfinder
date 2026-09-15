@@ -3,7 +3,6 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as rds from 'aws-cdk-lib/aws-rds';
-import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
@@ -11,14 +10,13 @@ import * as sfn_tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { Construct } from 'constructs';
 
 interface ScrapingStackProps extends cdk.StackProps {
-  database: rds.DatabaseInstance;
+  database: rds.DatabaseClusterFromSnapshot;
   vpc: ec2.Vpc;
 }
 
 export class ScrapingStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
   public readonly scrapingBucket: s3.Bucket;
-  public readonly scrapingQueue: sqs.Queue;
 
   constructor(scope: Construct, id: string, props: ScrapingStackProps) {
     super(scope, id, props);
@@ -37,20 +35,6 @@ export class ScrapingStack extends cdk.Stack {
           noncurrentVersionExpiration: cdk.Duration.days(30),
         },
       ],
-    });
-
-    // SQS queue for scraping jobs
-    this.scrapingQueue = new sqs.Queue(this, 'ScrapingQueue', {
-      queueName: 'landfinder-scraping-queue',
-      visibilityTimeout: cdk.Duration.minutes(15),
-      retentionPeriod: cdk.Duration.days(7),
-      deadLetterQueue: {
-        queue: new sqs.Queue(this, 'ScrapingDLQ', {
-          queueName: 'landfinder-scraping-dlq',
-          retentionPeriod: cdk.Duration.days(14),
-        }),
-        maxReceiveCount: 3,
-      },
     });
 
     // ECS Cluster
@@ -91,7 +75,6 @@ export class ScrapingStack extends cdk.Stack {
 
     // Grant permissions to task role
     this.scrapingBucket.grantReadWrite(taskRole);
-    this.scrapingQueue.grantConsumeMessages(taskRole);
     database.secret!.grantRead(taskRole);
 
     // Bedrock permissions for AI analysis
@@ -158,14 +141,14 @@ export class ScrapingStack extends cdk.Stack {
       },
     });
 
-    // Listings Scraper Task Definition
+    // Listings Scraper Task Definition (stub — no active source configured)
     const listingsTaskDef = new ecs.FargateTaskDefinition(
       this,
       'ListingsScraperTask',
       {
         family: 'landfinder-listings-scraper',
-        memoryLimitMiB: 4096,
-        cpu: 2048,
+        memoryLimitMiB: 512,
+        cpu: 256,
         executionRole: executionRole,
         taskRole: taskRole,
       }
@@ -242,9 +225,9 @@ export class ScrapingStack extends cdk.Stack {
       cluster: this.cluster,
       taskDefinition: cadastralTaskDef,
       launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
-      subnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-      },
+      // Public subnet with a public IP instead of a NAT. No inbound rules, so nothing can reach the task.
+      subnets: { subnetType: ec2.SubnetType.PUBLIC },
+      assignPublicIp: true,
     });
 
     const runWaterRightsScraper = new sfn_tasks.EcsRunTask(
@@ -255,9 +238,8 @@ export class ScrapingStack extends cdk.Stack {
         cluster: this.cluster,
         taskDefinition: waterRightsTaskDef,
         launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
-        subnets: {
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-        },
+        subnets: { subnetType: ec2.SubnetType.PUBLIC },
+        assignPublicIp: true,
       }
     );
 
@@ -266,9 +248,9 @@ export class ScrapingStack extends cdk.Stack {
       cluster: this.cluster,
       taskDefinition: listingsTaskDef,
       launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
-      subnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-      },
+      // Public subnet with a public IP instead of a NAT. No inbound rules, so nothing can reach the task.
+      subnets: { subnetType: ec2.SubnetType.PUBLIC },
+      assignPublicIp: true,
     });
 
     const runHuntingDistrictsScraper = new sfn_tasks.EcsRunTask(this, 'RunHuntingDistrictsScraper', {
@@ -276,9 +258,9 @@ export class ScrapingStack extends cdk.Stack {
       cluster: this.cluster,
       taskDefinition: huntingDistrictsTaskDef,
       launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
-      subnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-      },
+      // Public subnet with a public IP instead of a NAT. No inbound rules, so nothing can reach the task.
+      subnets: { subnetType: ec2.SubnetType.PUBLIC },
+      assignPublicIp: true,
     });
 
     const runStreamGaugesScraper = new sfn_tasks.EcsRunTask(this, 'RunStreamGaugesScraper', {
@@ -286,9 +268,9 @@ export class ScrapingStack extends cdk.Stack {
       cluster: this.cluster,
       taskDefinition: streamGaugesTaskDef,
       launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
-      subnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-      },
+      // Public subnet with a public IP instead of a NAT. No inbound rules, so nothing can reach the task.
+      subnets: { subnetType: ec2.SubnetType.PUBLIC },
+      assignPublicIp: true,
     });
 
     // Define the workflow
@@ -321,11 +303,6 @@ export class ScrapingStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ScrapingBucketOutput', {
       value: this.scrapingBucket.bucketName,
       exportName: 'LandFinderScrapingBucket',
-    });
-
-    new cdk.CfnOutput(this, 'ScrapingQueueUrlOutput', {
-      value: this.scrapingQueue.queueUrl,
-      exportName: 'LandFinderScrapingQueueUrl',
     });
 
     new cdk.CfnOutput(this, 'ScraperRepoUriOutput', {

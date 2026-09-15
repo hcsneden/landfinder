@@ -3,6 +3,8 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatch_actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as eventsTargets from 'aws-cdk-lib/aws-events-targets';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -10,6 +12,7 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as rds from 'aws-cdk-lib/aws-rds';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as path from 'path';
@@ -18,7 +21,7 @@ import { Construct } from 'constructs';
 interface ApiStackProps extends cdk.StackProps {
   userPool: cognito.UserPool;
   userPoolClient: cognito.UserPoolClient;
-  database: rds.DatabaseInstance;
+  database: rds.DatabaseClusterFromSnapshot;
   vpc: ec2.Vpc;
   usersTable: dynamodb.Table;
   searchesTable: dynamodb.Table;
@@ -33,9 +36,9 @@ export class ApiStack extends cdk.Stack {
 
     const { userPool, userPoolClient, database, vpc, usersTable, searchesTable, allowedOrigins } = props;
 
-    const privateSubnets = { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS };
-
-    const lambdaSecurityGroup = new ec2.SecurityGroup(this, 'LambdaSecurityGroup', {
+    // Unused since the Lambdas moved out of the VPC. Kept for one deploy so CloudFormation
+    // does not try to delete it while Lambda's VPC network interfaces are still draining.
+    new ec2.SecurityGroup(this, 'LambdaSecurityGroup', {
       vpc,
       description: 'Security group for LandFinder Lambda functions',
       allowAllOutbound: true,
@@ -64,11 +67,25 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
+    // Serper.dev API key for the "is this for sale?" check — provides Google SERP
+    // results that are fed to the existing Bedrock client for classification, no
+    // separate model/account integration needed. (Replaces Google's Custom Search
+    // JSON API, which Google closed to new customers.) Created as a placeholder —
+    // after deploy, populate it via Secrets Manager with the real { apiKey } JSON
+    // from serper.dev.
+    const serperSecret = new secretsmanager.Secret(this, 'SerperSecret', {
+      secretName: 'landfinder/serper',
+      description: 'Serper.dev API key (apiKey) for listing-status web search',
+      generateSecretString: {
+        secretStringTemplate: JSON.stringify({ apiKey: '' }),
+        generateStringKey: 'placeholder',
+      },
+    });
+
     // Common Lambda environment variables
     const commonEnv = {
+      DATABASE_CLUSTER_ARN: database.clusterArn,
       DATABASE_SECRET_ARN: database.secret!.secretArn,
-      DATABASE_HOST: database.instanceEndpoint.hostname,
-      DATABASE_PORT: database.instanceEndpoint.port.toString(),
       DATABASE_NAME: 'landfinder',
       USERS_TABLE: usersTable.tableName,
       USER_POOL_ID: userPool.userPoolId,
@@ -89,9 +106,6 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       tracing: lambda.Tracing.ACTIVE,
       environment: commonEnv,
-      vpc,
-      vpcSubnets: privateSubnets,
-      securityGroups: [lambdaSecurityGroup],
       bundling: {
         minify: true,
         sourceMap: true,
@@ -156,11 +170,14 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(60),
       environment: {
         ...commonEnv,
-        BEDROCK_MODEL_ID: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
+        BEDROCK_MODEL_ID: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+        SERPER_SECRET_ARN: serperSecret.secretArn,
       },
     });
 
-    // Lookup by address or parcel number — queries Cadastral ArcGIS + seeds water rights inline
+    // Lookup by address or parcel number — queries Cadastral ArcGIS + seeds water rights inline.
+    // Timeout is higher than other lookups because an ambiguous (multi-candidate) search
+    // also runs up to 10 parallel web search + Bedrock "is this for sale?" checks.
     const parcelLookupFn = new lambdaNode.NodejsFunction(this, 'ParcelLookupFunction', {
       ...lambdaDefaults,
       functionName: 'landfinder-parcel-lookup',
@@ -169,6 +186,8 @@ export class ApiStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: {
         ...commonEnv,
+        SERPER_SECRET_ARN: serperSecret.secretArn,
+        BEDROCK_MODEL_ID: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
         // Montana state GIS servers use intermediate CAs not in the Lambda cert bundle
         NODE_TLS_REJECT_UNAUTHORIZED: '0',
       },
@@ -180,11 +199,23 @@ export class ApiStack extends cdk.Stack {
       entry: path.join(__dirname, '../../services/api/migration/handler.ts'),
       handler: 'handler',
       timeout: cdk.Duration.seconds(120),
-      environment: {
-        DATABASE_SECRET_ARN: database.secret!.secretArn,
-      },
     });
-    database.secret!.grantRead(migrationFn);
+    database.grantDataApiAccess(migrationFn);
+
+    // Aurora pauses when idle and resumes in ~15s, but 30s+ after a day paused, which
+    // would exceed API Gateway's timeout. A ping every 12 hours keeps it out of deep sleep.
+    const dbWarmupFn = new lambdaNode.NodejsFunction(this, 'DbWarmupFunction', {
+      ...lambdaDefaults,
+      functionName: 'landfinder-db-warmup',
+      entry: path.join(__dirname, '../../services/api/warmup/handler.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(60),
+    });
+    database.grantDataApiAccess(dbWarmupFn);
+    new events.Rule(this, 'DbWarmupSchedule', {
+      schedule: events.Schedule.rate(cdk.Duration.hours(12)),
+      targets: [new eventsTargets.LambdaFunction(dbWarmupFn)],
+    });
 
     const userFn = new lambdaNode.NodejsFunction(this, 'UserFunction', {
       ...lambdaDefaults,
@@ -198,28 +229,33 @@ export class ApiStack extends cdk.Stack {
     });
 
     // IAM permissions
-    database.secret!.grantRead(authLoginFn);
-    database.secret!.grantRead(authRegisterFn);
-    database.secret!.grantRead(searchWorkerFn);
-    database.secret!.grantRead(parcelFn);
-    database.secret!.grantRead(parcelLookupFn);
-    database.secret!.grantRead(userFn);
+    database.grantDataApiAccess(authLoginFn);
+    database.grantDataApiAccess(authRegisterFn);
+    database.grantDataApiAccess(searchWorkerFn);
+    database.grantDataApiAccess(parcelFn);
+    database.grantDataApiAccess(parcelLookupFn);
+    database.grantDataApiAccess(userFn);
+
+    serperSecret.grantRead(parcelFn);
+    serperSecret.grantRead(parcelLookupFn);
 
     searchesTable.grantReadWriteData(searchFn);
     searchesTable.grantReadWriteData(searchWorkerFn);
     searchesTable.grantReadData(userFn);
     searchJobsQueue.grantSendMessages(searchFn);
 
-    parcelFn.addToRolePolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ['bedrock:InvokeModel'],
-        resources: [
-          'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
-          `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-*`,
-        ],
-      })
-    );
+    const bedrockInvokePolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
+        'arn:aws:bedrock:*::foundation-model/us.anthropic.claude-*',
+        `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-*`,
+      ],
+    });
+    parcelFn.addToRolePolicy(bedrockInvokePolicy);
+    // Also needed for the listing-status check on ambiguous (multi-candidate) lookups
+    parcelLookupFn.addToRolePolicy(bedrockInvokePolicy);
 
     usersTable.grantReadWriteData(authLoginFn);
     usersTable.grantReadWriteData(authRegisterFn);
@@ -293,6 +329,12 @@ export class ApiStack extends cdk.Stack {
     parcelByIdResource.addResource('hunting-districts').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
     parcelByIdResource.addResource('stream-gauges').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
     parcelByIdResource.addResource('road-access').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('utilities').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('environmental-risk').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('conservation-easements').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('listing-status').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('soil').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+    parcelByIdResource.addResource('groundwater').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
 
     const userResource = this.api.root.addResource('user');
     const savedResource = userResource.addResource('saved');

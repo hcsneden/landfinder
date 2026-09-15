@@ -1,0 +1,25 @@
+# PostGIS instance for the parcel-go integration test.
+#
+#   docker compose up -d
+#   DATABASE_URL=postgres://landfinder:landfinder@localhost:5433/landfinder?sslmode=disable \
+#     go test -tags integration ./internal/parcel/ -run Integration -v
+#   docker compose down
+#
+# Port 5433 avoids clashing with a local Postgres on 5432. The schema is loaded
+# once on first boot via the initdb hook.
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: landfinder
+      POSTGRES_PASSWORD: landfinder
+      POSTGRES_DB: landfinder
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./testdata/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U landfinder -d landfinder"]
+      interval: 2s
+      timeout: 3s
+      retries: 15

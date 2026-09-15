@@ -55,6 +55,15 @@ async function executeSearch(criteria: SearchCriteria): Promise<SearchResult[]> 
     paramIndex++;
   }
 
+  if (criteria.bbox) {
+    const { minLng, minLat, maxLng, maxLat } = criteria.bbox;
+    conditions.push(
+      `ST_Within(p.coordinates::geometry, ST_MakeEnvelope($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, 4326))`
+    );
+    params.push(minLng, minLat, maxLng, maxLat);
+    paramIndex += 4;
+  }
+
   const waterRightsJoin = criteria.waterRightsRequired
     ? 'INNER JOIN water_rights wr ON p.id = wr.parcel_id'
     : 'LEFT JOIN water_rights wr ON p.id = wr.parcel_id';
@@ -143,6 +152,8 @@ async function executeSearch(criteria: SearchCriteria): Promise<SearchResult[]> 
           ? { latitude: row.latitude, longitude: row.longitude }
           : null,
       boundary: null,
+      buildingValue: null,
+      propType: null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

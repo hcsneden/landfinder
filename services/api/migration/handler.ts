@@ -1,7 +1,5 @@
-import { Pool } from 'pg';
-import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
-
-const secretsClient = new SecretsManagerClient({});
+import { execute } from '../shared/db';
+import { logger } from '../shared/logger';
 
 const SCHEMA_SQL = `
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -21,6 +19,9 @@ CREATE TABLE IF NOT EXISTS parcels (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(state, parcel_number)
 );
+
+ALTER TABLE parcels ADD COLUMN IF NOT EXISTS building_value DECIMAL(12,2);
+ALTER TABLE parcels ADD COLUMN IF NOT EXISTS prop_type VARCHAR(100);
 
 CREATE INDEX IF NOT EXISTS idx_parcels_state ON parcels(state);
 CREATE INDEX IF NOT EXISTS idx_parcels_county ON parcels(county);
@@ -176,35 +177,90 @@ CREATE TABLE IF NOT EXISTS road_access_cache (
   roads      JSONB NOT NULL DEFAULT '[]',
   fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Migration 004: Utility Access Cache
+CREATE TABLE IF NOT EXISTS utility_access_cache (
+  parcel_id  UUID PRIMARY KEY REFERENCES parcels(id) ON DELETE CASCADE,
+  electric   JSONB,
+  broadband  JSONB NOT NULL DEFAULT '[]',
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Migration 005: Environmental Risk Cache
+CREATE TABLE IF NOT EXISTS environmental_risk_cache (
+  parcel_id      UUID PRIMARY KEY REFERENCES parcels(id) ON DELETE CASCADE,
+  flood_zones    JSONB NOT NULL DEFAULT '[]',
+  wildfire_risk  VARCHAR(20),
+  mine_sites     JSONB NOT NULL DEFAULT '[]',
+  fetched_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Migration 006: Conservation Easement Cache
+CREATE TABLE IF NOT EXISTS conservation_easement_cache (
+  parcel_id  UUID PRIMARY KEY REFERENCES parcels(id) ON DELETE CASCADE,
+  easements  JSONB NOT NULL DEFAULT '[]',
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Migration 008: Soil Info Cache (NRCS SSURGO via Soil Data Access)
+CREATE TABLE IF NOT EXISTS soil_info_cache (
+  parcel_id  UUID PRIMARY KEY REFERENCES parcels(id) ON DELETE CASCADE,
+  map_units  JSONB NOT NULL DEFAULT '[]',
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Migration 009: Groundwater / Well Logs Cache (MBMG GWIC)
+CREATE TABLE IF NOT EXISTS groundwater_cache (
+  parcel_id    UUID PRIMARY KEY REFERENCES parcels(id) ON DELETE CASCADE,
+  wells        JSONB NOT NULL DEFAULT '[]',
+  radius_miles DOUBLE PRECISION NOT NULL DEFAULT 2,
+  fetched_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Migration 007: Listing Status Cache (Claude web-search "is this for sale" check)
+-- Keyed by cadastral PARCELID, not parcels.id — candidates from an ambiguous search
+-- aren't upserted into the parcels table until selected, but still need to be checked/cached.
+CREATE TABLE IF NOT EXISTS listing_status_cache (
+  parcel_number TEXT PRIMARY KEY,
+  for_sale      BOOLEAN NOT NULL,
+  confidence    VARCHAR(10) NOT NULL,
+  price         DECIMAL(12,2),
+  listing_url   TEXT,
+  source        VARCHAR(100),
+  summary       TEXT,
+  fetched_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
-export async function handler(): Promise<{ statusCode: number; body: string }> {
-  const secretArn = process.env.DATABASE_SECRET_ARN;
-  if (!secretArn) throw new Error('DATABASE_SECRET_ARN not set');
-
-  const response = await secretsClient.send(new GetSecretValueCommand({ SecretId: secretArn }));
-  if (!response.SecretString) throw new Error('No secret value returned');
-
-  const creds = JSON.parse(response.SecretString) as {
-    host: string; port: number; username: string; password: string; dbname: string;
-  };
-
-  const pool = new Pool({
-    host: creds.host,
-    port: creds.port,
-    user: creds.username,
-    password: creds.password,
-    database: creds.dbname,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 10000,
-  });
-
-  try {
-    console.log('Running schema migration...');
-    await pool.query(SCHEMA_SQL);
-    console.log('Migration completed successfully');
-    return { statusCode: 200, body: 'Migration completed successfully' };
-  } finally {
-    await pool.end();
+// The Data API runs one statement per call. Split on semicolons outside $$ function bodies.
+export function splitStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let current = '';
+  let inDollarQuote = false;
+  for (let i = 0; i < sql.length; i++) {
+    if (sql.startsWith('$$', i)) {
+      inDollarQuote = !inDollarQuote;
+      current += '$$';
+      i++;
+      continue;
+    }
+    if (sql[i] === ';' && !inDollarQuote) {
+      if (current.trim()) statements.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += sql[i];
   }
+  if (current.trim()) statements.push(current.trim());
+  return statements;
+}
+
+export async function handler(): Promise<{ statusCode: number; body: string }> {
+  const statements = splitStatements(SCHEMA_SQL);
+  logger.info('Running schema migration', { statements: statements.length });
+  for (const statement of statements) {
+    await execute(statement);
+  }
+  logger.info('Migration completed successfully');
+  return { statusCode: 200, body: 'Migration completed successfully' };
 }

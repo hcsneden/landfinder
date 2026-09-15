@@ -159,7 +159,7 @@ async function fetchAllHuntingDistricts(): Promise<void> {
       layerFetched += features.length;
 
       if (offset === 0 && features.length > 0) {
-        console.log(`  Fields: ${Object.keys(features[0].properties ?? {}).join(', ')}`);
+        console.log(`  Fields: ${Object.keys(features[0]!.properties ?? {}).join(', ')}`);
       }
 
       for (const feature of features) {

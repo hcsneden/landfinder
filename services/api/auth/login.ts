@@ -69,7 +69,7 @@ export async function handler(
     }
 
     const tokenParts = IdToken.split('.');
-    const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString()) as { sub?: string };
+    const payload = JSON.parse(Buffer.from(tokenParts[1]!, 'base64').toString()) as { sub?: string };
     const userId = payload.sub;
 
     if (!userId) {

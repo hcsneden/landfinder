@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@hcsneden/design-library'
 import { useStore } from '../store'
 import { MapView } from '../components/MapView'
@@ -5,7 +6,15 @@ import { SearchPanel } from '../components/SearchPanel'
 import { ParcelDetailSheet } from '../components/ParcelDetailSheet'
 
 export function MapPage() {
-  const { user, clearAuth, isPanelOpen, togglePanel, isDetailOpen } = useStore()
+  const { user, isPanelOpen, isDetailOpen } = useStore(
+    useShallow((state) => ({
+      user: state.user,
+      isPanelOpen: state.isPanelOpen,
+      isDetailOpen: state.isDetailOpen,
+    }))
+  )
+  const clearAuth = useStore((state) => state.clearAuth)
+  const togglePanel = useStore((state) => state.togglePanel)
 
   return (
     <>

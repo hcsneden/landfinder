@@ -5,6 +5,7 @@ import type {
   SearchCriteria,
   SearchJob,
   Parcel,
+  ParcelCandidates,
   WaterRight,
   Listing,
   ParcelInsight,
@@ -14,12 +15,15 @@ import type {
   HuntingDistrict,
   StreamGauge,
   RoadAccess,
+  UtilityAccess,
+  EnvironmentalRisk,
+  ConservationEasement,
+  ListingStatus,
 } from '@landfinder/shared'
-import type { BBox } from '../store'
+import { useStore } from '../store'
 
-export interface WebSearchCriteria extends SearchCriteria {
-  bbox?: BBox
-}
+// SearchCriteria already includes bbox via shared types; alias for clarity at the call site
+export type WebSearchCriteria = SearchCriteria
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
@@ -28,8 +32,8 @@ function getToken(): string | null {
     const stored = localStorage.getItem('landfinder-session')
     if (!stored) return null
     const parsed = JSON.parse(stored) as { state?: { tokens?: AuthTokens } }
-    const t = parsed?.state?.tokens
-    return t?.idToken ?? t?.accessToken ?? null
+    const tokens = parsed?.state?.tokens
+    return tokens?.idToken ?? tokens?.accessToken ?? null
   } catch {
     return null
   }
@@ -47,16 +51,21 @@ async function apiFetch<T>(
   if (token) headers['Authorization'] = `Bearer ${token}`
 
   try {
-    const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { error?: { message?: string }; message?: string }
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers })
+    if (response.status === 401) {
+      useStore.getState().clearAuth()
+      window.location.replace('/auth')
+      return { success: false, error: { code: '401', message: 'Session expired' } }
+    }
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({})) as { error?: { message?: string }; message?: string }
       return {
         success: false,
-        error: { code: String(res.status), message: body.error?.message ?? body.message ?? 'Request failed' },
+        error: { code: String(response.status), message: errorBody.error?.message ?? errorBody.message ?? 'Request failed' },
       }
     }
-    return res.json() as Promise<ApiResponse<T>>
-  } catch (err) {
+    return response.json() as Promise<ApiResponse<T>>
+  } catch {
     return {
       success: false,
       error: { code: 'NETWORK_ERROR', message: 'Could not reach the server' },
@@ -92,7 +101,7 @@ export const searchApi = {
 }
 
 export const parcelApi = {
-  lookupParcel: (q: string) => apiFetch<Parcel>(`/parcels/lookup?q=${encodeURIComponent(q)}`),
+  lookupParcel: (q: string) => apiFetch<Parcel | ParcelCandidates>(`/parcels/lookup?q=${encodeURIComponent(q)}`),
   getParcel: (id: string) => apiFetch<Parcel>(`/parcels/${id}`),
   getWaterRights: (id: string) => apiFetch<WaterRight[]>(`/parcels/${id}/water-rights`),
   getListings: (id: string) => apiFetch<Listing[]>(`/parcels/${id}/listings`),
@@ -100,6 +109,11 @@ export const parcelApi = {
   getHuntingDistricts: (id: string) => apiFetch<HuntingDistrict[]>(`/parcels/${id}/hunting-districts`),
   getStreamGauges: (id: string) => apiFetch<StreamGauge[]>(`/parcels/${id}/stream-gauges`),
   getRoadAccess: (id: string) => apiFetch<RoadAccess>(`/parcels/${id}/road-access`),
+  getUtilities: (id: string) => apiFetch<UtilityAccess>(`/parcels/${id}/utilities`),
+  getEnvironmentalRisk: (id: string) => apiFetch<EnvironmentalRisk>(`/parcels/${id}/environmental-risk`),
+  getConservationEasements: (id: string) => apiFetch<ConservationEasement[]>(`/parcels/${id}/conservation-easements`),
+  checkListingStatus: (id: string, opts?: { refresh?: boolean }) =>
+    apiFetch<ListingStatus>(`/parcels/${id}/listing-status${opts?.refresh ? '?refresh=true' : ''}`),
 }
 
 export const userApi = {
