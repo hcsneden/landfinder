@@ -31,10 +31,10 @@ func main() {
 	}
 	defer pool.Close()
 
-	gis := arcgis.New()
+	gis := arcgis.New(envOr("GEOCODER_CONTACT_EMAIL", ""))
 	svc := parcel.New(gis, parcel.NewGeocoder(gis, log), parcel.NewPostgresStore(pool), log)
 
-	addr := ":" + cmp(os.Getenv("PORT"), "8080")
+	addr := ":" + envOr("PORT", "8080")
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           svc.Handler(),
@@ -47,9 +47,9 @@ func main() {
 	}
 }
 
-func cmp(v, fallback string) string {
-	if v == "" {
-		return fallback
+func envOr(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
 	}
-	return v
+	return fallback
 }

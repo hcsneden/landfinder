@@ -4,7 +4,6 @@ package arcgis
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,27 +16,21 @@ const DefaultTimeout = 25 * time.Second
 
 // Client issues GET requests against GIS endpoints and decodes JSON responses.
 type Client struct {
-	http *http.Client
+	http      *http.Client
+	userAgent string
 }
 
-// New returns a Client configured for the quirks of Montana state GIS servers,
-// which present intermediate CAs not in the default trust bundle. This mirrors
-// the `rejectUnauthorized: false` agent in the original Node implementation.
-func New() *Client {
+// New returns a Client with the default timeout. contactEmail goes in the
+// User-Agent, which Nominatim's usage policy requires.
+func New(contactEmail string) *Client {
 	return &Client{
-		http: &http.Client{
-			Timeout: DefaultTimeout,
-			Transport: &http.Transport{
-				// #nosec G402 -- documented gap: MT GIS hosts use intermediate CAs
-				// absent from the system bundle; pinning would be the production fix.
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
+		http:      &http.Client{Timeout: DefaultTimeout},
+		userAgent: fmt.Sprintf("landfinder/1.0 (%s)", contactEmail),
 	}
 }
 
 // NewWithClient lets tests inject an *http.Client pointed at an httptest.Server.
-func NewWithClient(c *http.Client) *Client { return &Client{http: c} }
+func NewWithClient(c *http.Client) *Client { return &Client{http: c, userAgent: "landfinder/test"} }
 
 // GetJSON issues a GET to rawURL and decodes the response body into v.
 // The provided context bounds the request; a deadline there overrides the
@@ -47,8 +40,7 @@ func (c *Client) GetJSON(ctx context.Context, rawURL string, v any) error {
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	// Nominatim and some ArcGIS hosts reject requests without a User-Agent.
-	req.Header.Set("User-Agent", "landfinder/1.0 (hcsneden@gmail.com)")
+	req.Header.Set("User-Agent", c.userAgent)
 
 	resp, err := c.http.Do(req)
 	if err != nil {

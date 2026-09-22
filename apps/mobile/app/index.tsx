@@ -3,9 +3,9 @@ import { useAuthStore } from '../hooks/useAuthStore';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
 export default function Index() {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { tokens, isRestoring } = useAuthStore();
 
-  if (isLoading) {
+  if (isRestoring) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#1a5f2a" />
@@ -13,7 +13,7 @@ export default function Index() {
     );
   }
 
-  if (isAuthenticated) {
+  if (tokens) {
     return <Redirect href="/(tabs)/search" />;
   }
 

@@ -1,299 +1,141 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { upsertParcel, closePool } from '../shared/db';
 import { MONTANA_COUNTIES } from '@lastbestland/shared';
+import { execute, closePool } from '../shared/db';
+import { fetchJson, sleep } from '../shared/http';
+import { runScraper, writeRunSummary } from '../shared/runSummary';
 
-const CADASTRAL_BASE_URL = 'https://gis.dnrc.mt.gov/arcgis/rest/services';
-const PARCEL_SERVICE = '/Cadastral/Cadastral_Parcels/MapServer/0';
+// Montana State Library cadastral parcels, the same layer the API's lookup
+// uses. PARCELID is the state geocode.
+const CADASTRAL_URL = 'https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1/query';
+const PAGE_SIZE = 1000;
 const REQUEST_TIMEOUT_MS = 60_000;
+const PAUSE_BETWEEN_PAGES_MS = 500;
 
-interface ParcelFeature {
-  attributes: {
-    OBJECTID: number;
-    PARCELID: string;
-    GEOCODE: string;
-    COUNTYNAME: string;
-    OWNERNAME: string;
-    OWNERADDRESS: string;
-    OWNERCITY: string;
-    OWNERSTATE: string;
-    OWNERZIP: string;
-    PROPERTYADDRESS: string;
-    ACRES: number;
-    LEGAL: string;
-    TOWNSHIP: string;
-    RANGE: string;
-    SECTION: string;
-    MARKETVALUE: number;
-    TAXABLEVALUE: number;
-  };
-  geometry?: {
-    rings: number[][][];
-  };
+interface ParcelAttributes {
+  PARCELID: string;
+  CountyName: string | null;
+  AddressLine1: string | null;
+  CityStateZip: string | null;
+  TotalAcres: number | null;
+  GISAcres: number | null;
+  TotalBuildingValue: number | null;
+  PropType: string | null;
 }
 
-interface ArcGISResponse {
-  features: ParcelFeature[];
+interface ParcelFeature {
+  attributes: ParcelAttributes;
+  geometry?: { rings: number[][][] };
+}
+
+interface QueryResponse {
+  features?: ParcelFeature[];
   exceededTransferLimit?: boolean;
   error?: { message: string };
 }
 
-const s3Client = new S3Client({});
-
-async function fetchWithTimeout(url: string): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'LastBestLand/1.0 (Property Research Tool)' },
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+interface CountyStats {
+  processed: number;
+  errors: number;
 }
 
-async function queryParcels(
-  county: string,
-  offset = 0,
-  limit = 1000
-): Promise<ArcGISResponse> {
-  const params = new URLSearchParams({
-    where: `COUNTYNAME = '${county.toUpperCase().replace(/'/g, "''")}'`,
-    outFields: '*',
-    returnGeometry: 'true',
-    outSR: '4326',
-    f: 'json',
-    resultOffset: String(offset),
-    resultRecordCount: String(limit),
-  });
-
-  const res = await fetchWithTimeout(
-    `${CADASTRAL_BASE_URL}${PARCEL_SERVICE}/query?${params}`
-  );
-  if (!res.ok) throw new Error(`Cadastral API HTTP ${res.status}`);
-  return await res.json() as ArcGISResponse;
-}
-
-async function queryParcelsByAcreage(
-  county: string,
-  minAcres: number,
-  maxAcres?: number,
-  offset = 0,
-  limit = 1000
-): Promise<ArcGISResponse> {
-  let where = `COUNTYNAME = '${county.toUpperCase().replace(/'/g, "''")}' AND ACRES >= ${minAcres}`;
-  if (maxAcres !== undefined) {
-    where += ` AND ACRES <= ${maxAcres}`;
-  }
-
+async function fetchPage(where: string, offset: number): Promise<QueryResponse> {
   const params = new URLSearchParams({
     where,
-    outFields: '*',
+    outFields: 'PARCELID,CountyName,AddressLine1,CityStateZip,TotalAcres,GISAcres,TotalBuildingValue,PropType',
     returnGeometry: 'true',
     outSR: '4326',
-    f: 'json',
     resultOffset: String(offset),
-    resultRecordCount: String(limit),
+    resultRecordCount: String(PAGE_SIZE),
+    f: 'json',
   });
+  const data = await fetchJson<QueryResponse>(`${CADASTRAL_URL}?${params}`, REQUEST_TIMEOUT_MS);
+  if (data.error) throw new Error(`Cadastral query error: ${data.error.message}`);
+  return data;
+}
 
-  const res = await fetchWithTimeout(
-    `${CADASTRAL_BASE_URL}${PARCEL_SERVICE}/query?${params}`
+function formatAddress(attributes: ParcelAttributes): string | null {
+  if (!attributes.AddressLine1) return null;
+  const city = attributes.CityStateZip?.trim();
+  return `${attributes.AddressLine1.trim()}${city ? `, ${city}` : ''}`;
+}
+
+// The parcel point is the boundary centroid, computed in PostGIS.
+async function upsertParcel({ attributes, geometry }: ParcelFeature): Promise<void> {
+  const boundary = geometry?.rings ? JSON.stringify({ type: 'Polygon', coordinates: geometry.rings }) : null;
+  await execute(
+    `INSERT INTO parcels (state, county, parcel_number, geo_id, address, acreage, building_value, prop_type, boundary, coordinates)
+     SELECT 'MT', $1, $2, $2, $3, $4, $5, $6, b.geom, ST_Centroid(b.geom::geometry)::geography
+     FROM (SELECT ST_GeomFromGeoJSON($7)::geography AS geom) b
+     ON CONFLICT (state, parcel_number) DO UPDATE SET
+       county = EXCLUDED.county,
+       address = EXCLUDED.address,
+       acreage = EXCLUDED.acreage,
+       building_value = EXCLUDED.building_value,
+       prop_type = EXCLUDED.prop_type,
+       coordinates = COALESCE(EXCLUDED.coordinates, parcels.coordinates),
+       boundary = COALESCE(EXCLUDED.boundary, parcels.boundary),
+       updated_at = NOW()`,
+    [
+      attributes.CountyName,
+      attributes.PARCELID,
+      formatAddress(attributes),
+      attributes.TotalAcres ?? attributes.GISAcres,
+      attributes.TotalBuildingValue,
+      attributes.PropType,
+      boundary,
+    ]
   );
-  if (!res.ok) throw new Error(`Cadastral API HTTP ${res.status}`);
-  return await res.json() as ArcGISResponse;
 }
 
-function calculateCentroid(rings: number[][][]): { lat: number; lng: number } | null {
-  const outerRing = rings[0];
-  if (!outerRing || outerRing.length === 0) return null;
+async function scrapeCounty(county: string, minAcres: number): Promise<CountyStats> {
+  const where = `CountyName = '${county.replace(/'/g, "''")}' AND TotalAcres >= ${minAcres}`;
+  const stats: CountyStats = { processed: 0, errors: 0 };
+  console.log(`Scraping ${county} County`);
 
-  let sumLat = 0;
-  let sumLng = 0;
-  for (const point of outerRing) {
-    sumLng += point[0] ?? 0;
-    sumLat += point[1] ?? 0;
-  }
-  return { lat: sumLat / outerRing.length, lng: sumLng / outerRing.length };
-}
-
-async function processFeature(feature: ParcelFeature): Promise<string | null> {
-  const { attributes, geometry } = feature;
-
-  if (!attributes.PARCELID) {
-    console.warn('Skipping feature without PARCELID');
-    return null;
-  }
-
-  let latitude: number | null = null;
-  let longitude: number | null = null;
-  let boundaryGeoJson: string | null = null;
-
-  if (geometry?.rings) {
-    boundaryGeoJson = JSON.stringify({ type: 'Polygon', coordinates: geometry.rings });
-    const centroid = calculateCentroid(geometry.rings);
-    if (centroid) {
-      latitude = centroid.lat;
-      longitude = centroid.lng;
-    }
-  }
-
-  return upsertParcel({
-    state: 'MT',
-    county: attributes.COUNTYNAME,
-    parcelNumber: attributes.PARCELID,
-    geoId: attributes.GEOCODE,
-    address: attributes.PROPERTYADDRESS || null,
-    acreage: attributes.ACRES || null,
-    latitude,
-    longitude,
-    boundaryGeoJson,
-  });
-}
-
-async function scrapeCounty(county: string): Promise<{ processed: number; errors: number }> {
-  console.log(`Starting scrape for ${county} County, MT`);
-
-  let offset = 0;
-  const limit = 1000;
-  let processed = 0;
-  let errors = 0;
-  let hasMore = true;
-
-  while (hasMore) {
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    let page: QueryResponse;
     try {
-      console.log(`Fetching parcels ${offset} to ${offset + limit}...`);
-      const response = await queryParcels(county, offset, limit);
-
-      if (!response.features || response.features.length === 0) {
-        hasMore = false;
-        break;
-      }
-
-      for (const feature of response.features) {
-        try {
-          const parcelId = await processFeature(feature);
-          if (parcelId) processed++;
-        } catch (err) {
-          console.error(`Error processing parcel ${feature.attributes?.PARCELID}:`, err);
-          errors++;
-        }
-      }
-
-      hasMore = response.exceededTransferLimit === true;
-      offset += limit;
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      page = await fetchPage(where, offset);
     } catch (err) {
-      console.error(`Error fetching parcels at offset ${offset}:`, err);
-      errors++;
-      hasMore = false;
+      console.error(`${county}: fetch failed at offset ${offset}:`, err);
+      stats.errors++;
+      break;
     }
-  }
-
-  console.log(`Completed ${county} County: ${processed} processed, ${errors} errors`);
-  return { processed, errors };
-}
-
-async function scrapeAllCounties(): Promise<void> {
-  const results: Record<string, { processed: number; errors: number }> = {};
-
-  for (const county of MONTANA_COUNTIES) {
-    try {
-      results[county] = await scrapeCounty(county);
-    } catch (err) {
-      console.error(`Failed to scrape ${county} County:`, err);
-      results[county] = { processed: 0, errors: 1 };
-    }
-  }
-
-  const summary = {
-    timestamp: new Date().toISOString(),
-    counties: results,
-    totals: {
-      processed: Object.values(results).reduce((sum, r) => sum + r.processed, 0),
-      errors: Object.values(results).reduce((sum, r) => sum + r.errors, 0),
-    },
-  };
-
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET || 'landfinder-scraping',
-      Key: `cadastral/runs/${new Date().toISOString().split('T')[0]}.json`,
-      Body: JSON.stringify(summary, null, 2),
-      ContentType: 'application/json',
-    })
-  );
-
-  console.log('Scrape complete:', summary.totals);
-}
-
-async function scrapeLargeParcels(minAcres = 2): Promise<void> {
-  console.log(`Scraping parcels >= ${minAcres} acres across all counties`);
-
-  let totalProcessed = 0;
-  let totalErrors = 0;
-
-  for (const county of MONTANA_COUNTIES) {
-    console.log(`Processing ${county} County...`);
-
-    let offset = 0;
-    const limit = 1000;
-    let hasMore = true;
-
-    while (hasMore) {
+    for (const feature of page.features ?? []) {
+      if (!feature.attributes.PARCELID) continue;
       try {
-        const response = await queryParcelsByAcreage(county, minAcres, undefined, offset, limit);
-
-        if (!response.features || response.features.length === 0) {
-          hasMore = false;
-          break;
-        }
-
-        for (const feature of response.features) {
-          try {
-            const parcelId = await processFeature(feature);
-            if (parcelId) totalProcessed++;
-          } catch (err) {
-            console.error(`Error processing parcel ${feature.attributes?.PARCELID}:`, err);
-            totalErrors++;
-          }
-        }
-
-        hasMore = response.exceededTransferLimit === true;
-        offset += limit;
-
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await upsertParcel(feature);
+        stats.processed++;
       } catch (err) {
-        console.error(`Error fetching parcels for ${county}:`, err);
-        totalErrors++;
-        hasMore = false;
+        console.error(`${county}: failed to save parcel ${feature.attributes.PARCELID}:`, err);
+        stats.errors++;
       }
     }
+    if (!page.exceededTransferLimit) break;
+    await sleep(PAUSE_BETWEEN_PAGES_MS);
   }
 
-  console.log(`Large parcels scrape complete: ${totalProcessed} processed, ${totalErrors} errors`);
+  console.log(`${county} County: ${stats.processed} processed, ${stats.errors} errors`);
+  return stats;
 }
 
-async function main() {
-  const mode = process.env.SCRAPE_MODE || 'large';
+/**
+ * Loads parcels for one county (COUNTY) or every county, keeping parcels of at
+ * least MIN_ACRES acres. MIN_ACRES defaults to 2 because sub-acre town lots
+ * are not what the app is for.
+ */
+async function main(): Promise<void> {
+  const minAcres = Number.parseFloat(process.env.MIN_ACRES ?? '2');
+  const counties = process.env.COUNTY ? [process.env.COUNTY] : [...MONTANA_COUNTIES];
 
-  try {
-    if (mode === 'all') {
-      await scrapeAllCounties();
-    } else if (mode === 'large') {
-      const minAcres = parseInt(process.env.MIN_ACRES || '2', 10);
-      await scrapeLargeParcels(minAcres);
-    } else if (mode === 'county') {
-      const county = process.env.COUNTY;
-      if (!county) throw new Error('COUNTY environment variable required for county mode');
-      await scrapeCounty(county);
-    }
-  } finally {
-    await closePool();
+  const byCounty: Record<string, CountyStats> = {};
+  for (const county of counties) {
+    byCounty[county] = await scrapeCounty(county, minAcres);
   }
+  const totals = Object.values(byCounty).reduce(
+    (sum, stats) => ({ processed: sum.processed + stats.processed, errors: sum.errors + stats.errors }),
+    { processed: 0, errors: 0 }
+  );
+  await writeRunSummary('cadastral', { minAcres, counties: byCounty, totals });
 }
 
-main().catch((err) => {
-  console.error('Scraper failed:', err);
-  process.exit(1);
-});
+void runScraper('Cadastral scraper', main, closePool);

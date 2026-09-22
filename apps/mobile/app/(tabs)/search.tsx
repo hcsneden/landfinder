@@ -9,11 +9,11 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { searchApi, parcelApi } from '../../services/api';
+import { searchApi, unwrap } from '../../services/api';
+import { lookupParcelOrAlert } from '../../services/lookup';
 import {
   MONTANA_COUNTIES,
   formatAcreage,
@@ -154,7 +154,7 @@ function SearchFilters({
             criteria.waterRightsRequired && styles.waterRightsTextActive,
           ]}
         >
-          💧 Water Rights Required
+          Water rights required
         </Text>
       </TouchableOpacity>
     </View>
@@ -173,7 +173,7 @@ function SearchResultCard({ result }: { result: SearchResult }) {
           {formatAcreage(result.parcel.acreage)}
         </Text>
         {result.hasWaterRights && (
-          <Text style={styles.waterBadge}>💧 Water Rights</Text>
+          <Text style={styles.waterBadge}>Water rights</Text>
         )}
       </View>
 
@@ -181,8 +181,8 @@ function SearchResultCard({ result }: { result: SearchResult }) {
         {result.parcel.address || `${result.parcel.county || 'Unknown'} County, MT`}
       </Text>
 
-      {result.listing && (
-        <Text style={styles.resultPrice}>{formatPrice(result.listing.price)}</Text>
+      {result.listingStatus?.forSale && (
+        <Text style={styles.resultPrice}>{formatPrice(result.listingStatus.price)}</Text>
       )}
 
       {result.previewInsight && (
@@ -209,18 +209,9 @@ function LookupBar() {
     const q = query.trim();
     if (!q) return;
     setIsLooking(true);
-    const res = await parcelApi.lookupParcel(q);
+    const parcel = await lookupParcelOrAlert(q);
     setIsLooking(false);
-    if (res.success && res.data) {
-      router.push(`/parcel/${res.data.id}`);
-    } else {
-      Alert.alert(
-        'Not Found',
-        res.error?.code === '404'
-          ? 'No parcel found. Try a street address, parcel number, or geocode.'
-          : (res.error?.message ?? 'Lookup failed')
-      );
-    }
+    if (parcel) router.push(`/parcel/${parcel.id}`);
   };
 
   return (
@@ -317,30 +308,21 @@ export default function SearchScreen() {
 
   const searchMutation = useMutation({
     mutationFn: async () => {
-      const response = await searchApi.submitSearch(criteria);
-      if (response.data) {
-        setCurrentJobId(response.data.id);
-        return response.data;
-      }
-      throw new Error(response.error?.message || 'Search failed');
+      const job = unwrap(await searchApi.submitSearch(criteria));
+      setCurrentJobId(job.id);
+      return job;
     },
   });
 
   const resultsQuery = useQuery({
     queryKey: ['searchResults', currentJobId],
     queryFn: async () => {
-      if (!currentJobId) return null;
-      const response = await searchApi.getSearchResults(currentJobId);
-      if (response.data) {
-        return response.data;
-      }
-      throw new Error(response.error?.message || 'Failed to fetch results');
+      const results = unwrap(await searchApi.getSearchResults(currentJobId!));
+      // The job completes asynchronously. Results come back empty until it does.
+      return results.totalCount > 0 ? results : null;
     },
     enabled: !!currentJobId,
-    refetchInterval: (query) => {
-      // Poll while search is in progress
-      return query.state.data === null ? 2000 : false;
-    },
+    refetchInterval: (query) => (query.state.data === null ? 2000 : false),
   });
 
   const handleSearch = () => {

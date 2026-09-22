@@ -6,11 +6,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import MapView, { Marker, Region } from 'react-native-maps';
 import { router } from 'expo-router';
-import { parcelApi } from '../../services/api';
+import { lookupParcelOrAlert } from '../../services/lookup';
 import { formatAcreage } from '@lastbestland/shared';
 import type { Parcel } from '@lastbestland/shared';
 
@@ -31,20 +30,9 @@ export default function MapScreen() {
     const q = query.trim();
     if (!q) return;
     setIsLooking(true);
-    const res = await parcelApi.lookupParcel(q);
+    const parcel = await lookupParcelOrAlert(q);
     setIsLooking(false);
-
-    if (!res.success || !res.data) {
-      Alert.alert(
-        'Not Found',
-        res.error?.code === '404'
-          ? 'No parcel found. Try a street address, parcel number, or geocode.'
-          : (res.error?.message ?? 'Lookup failed')
-      );
-      return;
-    }
-
-    const parcel = res.data;
+    if (!parcel) return;
     setLookedUpParcel(parcel);
 
     if (parcel.coordinates) {
@@ -101,7 +89,6 @@ export default function MapScreen() {
         )}
       </MapView>
 
-      {/* Search bar */}
       <View style={styles.searchBar}>
         <TextInput
           style={styles.searchInput}
@@ -128,7 +115,6 @@ export default function MapScreen() {
         )}
       </View>
 
-      {/* Result card */}
       {lookedUpParcel && (
         <View style={styles.resultCard}>
           <View style={styles.resultCardContent}>

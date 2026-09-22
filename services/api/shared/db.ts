@@ -7,30 +7,25 @@ import {
   type Field,
   type SqlParameter,
 } from '@aws-sdk/client-rds-data';
+import { env } from './env';
 import { tracer } from './tracer';
 
-// The API Lambdas run outside the VPC and reach Aurora through the RDS Data API,
-// so there is no connection pool and no NAT. Callers keep writing pg-style SQL
-// with $1, $2 placeholders. toDataApiStatement translates it.
+// The API Lambdas run outside the VPC and reach Aurora through the RDS Data
+// API. Callers write pg-style SQL with $1, $2 placeholders and
+// toDataApiStatement translates it to named Data API parameters.
 
 const client = new RDSDataClient({});
 
-// Aurora pauses when idle. The first request after a pause gets
-// DatabaseResumingException for roughly 15 seconds, so retry within the
-// API Gateway timeout.
+// The first request after Aurora resumes from a pause gets
+// DatabaseResumingException for roughly 15 seconds.
 const RESUME_RETRY_DELAYS_MS = [1000, 2000, 3000, 4000, 5000, 5000];
 
 function databaseTarget(): Pick<ExecuteStatementCommandInput, 'resourceArn' | 'secretArn' | 'database'> {
-  const resourceArn = process.env.DATABASE_CLUSTER_ARN;
-  const secretArn = process.env.DATABASE_SECRET_ARN;
-  if (!resourceArn || !secretArn) {
-    throw new Error('DATABASE_CLUSTER_ARN and DATABASE_SECRET_ARN environment variables must be set');
-  }
-  return { resourceArn, secretArn, database: process.env.DATABASE_NAME ?? 'landfinder' };
+  return { resourceArn: env.databaseClusterArn, secretArn: env.databaseSecretArn, database: env.databaseName };
 }
 
-// Postgres array literal. The Data API has no array parameters, so arrays are
-// sent as text and the SQL casts them, e.g. $2::text[].
+// The Data API has no array parameters, so arrays travel as a Postgres array
+// literal and the SQL casts them, for example $2::text[].
 function toArrayLiteral(values: unknown[]): string {
   const items = values.map((v) => {
     if (v === null || v === undefined) return 'NULL';
@@ -70,8 +65,9 @@ export function toDataApiStatement(
   };
 }
 
-// Decode values the way node-postgres did, so callers see the same JS types:
-// timestamps and dates as Date, json as parsed objects, int8 and numeric as strings.
+// Every DECIMAL column in the schema has at most two decimal places, so
+// decoding numeric as a JS number loses nothing. int8 stays a string because
+// it can exceed Number.MAX_SAFE_INTEGER.
 function decodeScalar(value: string | number | boolean, typeName: string): unknown {
   switch (typeName) {
     case 'json':
@@ -82,8 +78,9 @@ function decodeScalar(value: string | number | boolean, typeName: string): unkno
       return new Date(`${String(value).replace(' ', 'T')}Z`);
     case 'date':
       return new Date(`${value}T00:00:00Z`);
-    case 'int8':
     case 'numeric':
+      return Number(value);
+    case 'int8':
       return String(value);
     default:
       return value;
@@ -159,7 +156,7 @@ export async function queryOne<T>(
   params?: unknown[]
 ): Promise<T | null> {
   const rows = await query<T>(sql, params);
-  return rows[0] || null;
+  return rows[0] ?? null;
 }
 
 export async function execute(

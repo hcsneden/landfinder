@@ -4,10 +4,11 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as path from 'path';
-import { Construct } from 'constructs';
+import { type Construct } from 'constructs';
+
+const WEB_DIST = path.join(__dirname, '../../apps/web/dist');
 
 export class WebStack extends cdk.Stack {
-  public readonly distributionUrl: string;
   public readonly distribution: cloudfront.Distribution;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -17,10 +18,11 @@ export class WebStack extends cdk.Stack {
       bucketName: `landfinder-web-${this.account}-${this.region}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
-      autoDeleteObjects: false,
     });
+    const origin = origins.S3BucketOrigin.withOriginAccessControl(bucket);
 
-    // Cache policy for HTML files — short TTL so deploys propagate quickly
+    // HTML is cached briefly so deploys show up quickly. Vite hashes asset
+    // file names, so assets can be cached for a year.
     const htmlCachePolicy = new cloudfront.CachePolicy(this, 'HtmlCachePolicy', {
       cachePolicyName: 'landfinder-html-cache',
       defaultTtl: cdk.Duration.minutes(5),
@@ -29,8 +31,6 @@ export class WebStack extends cdk.Stack {
       enableAcceptEncodingGzip: true,
       enableAcceptEncodingBrotli: true,
     });
-
-    // Vite hashes asset filenames — long TTL is safe
     const assetCachePolicy = new cloudfront.CachePolicy(this, 'AssetCachePolicy', {
       cachePolicyName: 'landfinder-asset-cache',
       defaultTtl: cdk.Duration.days(365),
@@ -40,46 +40,37 @@ export class WebStack extends cdk.Stack {
       enableAcceptEncodingBrotli: true,
     });
 
+    // Unknown paths return index.html so React Router can handle them.
+    const spaFallback = (httpStatus: number): cloudfront.ErrorResponse => ({
+      httpStatus,
+      responseHttpStatus: 200,
+      responsePagePath: '/index.html',
+      ttl: cdk.Duration.seconds(0),
+    });
+
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
       comment: 'LandFinder web app',
       defaultRootObject: 'index.html',
       defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(bucket),
+        origin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: htmlCachePolicy,
         compress: true,
       },
       additionalBehaviors: {
-        // Vite puts hashed assets in /assets/ — cache them aggressively
         '/assets/*': {
-          origin: origins.S3BucketOrigin.withOriginAccessControl(bucket),
+          origin,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           cachePolicy: assetCachePolicy,
           compress: true,
         },
       },
-      // SPA: return index.html for any 403/404 so React Router handles routing
-      errorResponses: [
-        {
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
-        {
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
-      ],
-      priceClass: cloudfront.PriceClass.PRICE_CLASS_100, // US/Europe/Canada only — cheapest
+      errorResponses: [spaFallback(403), spaFallback(404)],
+      priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
     });
 
-    this.distributionUrl = `https://${this.distribution.distributionDomainName}`;
-
     new s3deploy.BucketDeployment(this, 'DeployWeb', {
-      sources: [s3deploy.Source.asset(path.join(__dirname, '../../apps/web/dist'))],
+      sources: [s3deploy.Source.asset(WEB_DIST)],
       destinationBucket: bucket,
       distribution: this.distribution,
       distributionPaths: ['/*'],
@@ -87,11 +78,9 @@ export class WebStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'WebUrl', {
-      value: this.distributionUrl,
+      value: `https://${this.distribution.distributionDomainName}`,
       exportName: 'LandFinderWebUrl',
-      description: 'CloudFront URL for the LandFinder web app',
     });
-
     new cdk.CfnOutput(this, 'DistributionId', {
       value: this.distribution.distributionId,
       exportName: 'LandFinderDistributionId',

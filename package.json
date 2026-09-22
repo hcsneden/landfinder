@@ -12,15 +12,13 @@
     "web": "npm run dev --workspace=apps/web",
     "web:build": "npm run build --workspace=apps/web",
     "mobile": "npm run start --workspace=apps/mobile",
-    "mobile:ios": "npm run ios --workspace=apps/mobile",
-    "mobile:android": "npm run android --workspace=apps/mobile",
-    "mobile:web": "npm run web --workspace=apps/mobile",
     "infra:deploy": "npm run deploy --workspace=infrastructure",
     "infra:synth": "npm run synth --workspace=infrastructure",
     "lint": "eslint .",
     "typecheck": "npm run typecheck -w packages/shared -w services/api -w services/scrapers -w apps/web -w infrastructure",
     "typecheck:mobile": "npm run typecheck -w apps/mobile",
-    "test": "npm run test --workspaces --if-present"
+    "test": "vitest run",
+    "test:go": "cd services/parcel-go && go test ./..."
   },
   "overrides": {
     "@types/react": "19.2.17"
@@ -28,10 +26,11 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/react": "19.2.17",
-    "@typescript-eslint/eslint-plugin": "^6.19.0",
-    "@typescript-eslint/parser": "^6.19.0",
-    "eslint": "^8.56.0",
-    "typescript": "^5.3.3"
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^3.2.7"
   },
   "engines": {
     "node": ">=18.0.0"

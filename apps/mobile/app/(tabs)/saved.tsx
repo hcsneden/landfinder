@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { userApi, parcelApi } from '../../services/api';
+import { userApi, parcelApi, unwrap } from '../../services/api';
 import { formatAcreage, formatDate } from '@lastbestland/shared';
 import type { SavedParcel, Parcel } from '@lastbestland/shared';
 
@@ -50,26 +50,11 @@ function SavedParcelCard({ item }: { item: SavedParcelWithDetails }) {
 export default function SavedScreen() {
   const savedQuery = useQuery({
     queryKey: ['savedParcels'],
-    queryFn: async () => {
-      const response = await userApi.getSavedParcels();
-      if (response.data) {
-        // Fetch parcel details for each saved parcel
-        const withDetails = await Promise.all(
-          response.data.map(async (saved) => {
-            try {
-              const parcelResponse = await parcelApi.getParcel(saved.parcelId);
-              return {
-                ...saved,
-                parcelDetails: parcelResponse.data,
-              };
-            } catch {
-              return saved;
-            }
-          })
-        );
-        return withDetails;
-      }
-      throw new Error(response.error?.message || 'Failed to fetch saved parcels');
+    queryFn: async (): Promise<SavedParcelWithDetails[]> => {
+      const saved = unwrap(await userApi.getSavedParcels());
+      return Promise.all(
+        saved.map(async (item) => ({ ...item, parcelDetails: (await parcelApi.getParcel(item.parcelId)).data }))
+      );
     },
   });
 
@@ -81,7 +66,6 @@ export default function SavedScreen() {
         renderItem={({ item }) => <SavedParcelCard item={item} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyEmoji}>❤️</Text>
             <Text style={styles.emptyText}>No Saved Parcels</Text>
             <Text style={styles.emptySubtext}>
               Save parcels while searching to keep track of properties you're interested in
@@ -181,10 +165,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
-  },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
   },
   emptyText: {
     fontSize: 18,

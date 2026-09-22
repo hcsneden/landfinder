@@ -6,23 +6,30 @@ import (
 	"strings"
 )
 
-// Centroid returns the arithmetic mean of the outer ring's vertices.
-// The bool is false when the geometry has no usable ring.
+// Centroid returns the area-weighted centroid of the outer ring using the
+// shoelace formula. The bool is false when the ring has fewer than three
+// vertices or zero area.
 func Centroid(rings [][][]float64) (LatLng, bool) {
-	if len(rings) == 0 || len(rings[0]) == 0 {
+	if len(rings) == 0 || len(rings[0]) < 3 {
 		return LatLng{}, false
 	}
 	ring := rings[0]
-	var sumLat, sumLng float64
-	for _, p := range ring {
-		if len(p) < 2 {
-			continue
+	var area, cx, cy float64
+	for i := range ring {
+		p, q := ring[i], ring[(i+1)%len(ring)]
+		if len(p) < 2 || len(q) < 2 {
+			return LatLng{}, false
 		}
-		sumLng += p[0]
-		sumLat += p[1]
+		cross := p[0]*q[1] - q[0]*p[1]
+		area += cross
+		cx += (p[0] + q[0]) * cross
+		cy += (p[1] + q[1]) * cross
 	}
-	n := float64(len(ring))
-	return LatLng{Lat: sumLat / n, Lng: sumLng / n}, true
+	if area == 0 {
+		return LatLng{}, false
+	}
+	area /= 2
+	return LatLng{Lng: cx / (6 * area), Lat: cy / (6 * area)}, true
 }
 
 // extractStreetAddress returns the portion before the first comma.
@@ -52,7 +59,7 @@ func extractRoadName(q string) string {
 }
 
 var (
-	streetNumRe   = regexp.MustCompile(`^(\d+)\s+(.+)`)
+	streetNumRe    = regexp.MustCompile(`^(\d+)\s+(.+)`)
 	streetSuffixRe = regexp.MustCompile(`(?i)\s+(rd|road|st|street|ave|avenue|ln|lane|dr|drive|way|blvd|ct|court|pl|place|hwy|highway|loop|trl|trail|run|cir|circle|pike|row)\.?$`)
 )
 

@@ -1,4 +1,4 @@
-/* ─── Design Tokens ─────────────────────────────────────────────────────── */
+/* Design Tokens */
 
 :root {
   /* Trailhead palette */
@@ -36,7 +36,7 @@
   --shadow-lg: 0 8px 32px rgba(22,39,14,0.12);
 }
 
-/* ─── Reset ─────────────────────────────────────────────────────────────── */
+/* Reset */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -46,7 +46,7 @@ html, body, #root {
   background: var(--cream-mid);
 }
 
-/* ThemeProvider wrapper div needs full height */
+/* The design library ThemeProvider wraps the app in a div. */
 #root > div {
   height: 100%;
 }
@@ -61,7 +61,7 @@ body {
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; border: none; background: none; font: inherit; }
 
-/* ─── Header ─────────────────────────────────────────────────────────────── */
+/* Header */
 
 .header {
   position: fixed;
@@ -101,7 +101,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   font-family: var(--font-mono);
 }
 
-/* Override design library ghost button for dark header context */
+/* Ghost button on the dark header */
 .header .dl-button--ghost {
   color: rgba(255,255,255,0.6);
   border: 1px solid rgba(255,255,255,0.15);
@@ -133,7 +133,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   transition: transform 0.2s, opacity 0.2s;
 }
 
-/* ─── Layout ─────────────────────────────────────────────────────────────── */
+/* Layout */
 
 .app-layout {
   position: fixed;
@@ -142,7 +142,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   display: flex;
 }
 
-/* ─── Search Panel ───────────────────────────────────────────────────────── */
+/* Search Panel */
 
 .search-panel {
   width: var(--panel-w);
@@ -170,7 +170,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   flex-shrink: 0;
 }
 
-/* ─── Filters ────────────────────────────────────────────────────────────── */
+/* Filters */
 
 .filters-scroll {
   padding: 16px 20px;
@@ -187,13 +187,12 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
 .filters-scroll::-webkit-scrollbar-track { background: transparent; }
 .filters-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* Design library search button override for full-width */
 .search-btn-wrap .dl-button {
   width: 100%;
   justify-content: center;
 }
 
-/* ─── Empty / Loading states ─────────────────────────────────────────────── */
+/* Empty / Loading states */
 
 .panel-error {
   padding: 10px 14px;
@@ -281,7 +280,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ─── Map Container ──────────────────────────────────────────────────────── */
+/* Map Container */
 
 .map-wrap {
   flex: 1;
@@ -289,15 +288,13 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   overflow: hidden;
 }
 
-/* MapLibre overrides */
+/* MapLibre control overrides */
 .maplibregl-map { font-family: var(--font-sans) !important; }
 .maplibregl-ctrl-attrib { font-size: 10px !important; }
 .maplibregl-ctrl-group { box-shadow: var(--shadow-sm) !important; }
-.maplibregl-ctrl-group button {
-  border-radius: 0 !important;
-}
+.maplibregl-ctrl-group button { border-radius: 0 !important; }
 
-/* ─── Map Markers ────────────────────────────────────────────────────────── */
+/* Map Markers */
 
 .map-marker {
   display: flex;
@@ -359,9 +356,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   border-color: var(--border-dark);
 }
 
-/* Listed for sale. An outline rather than a fill so it reads on top of any score
-   color, and outline is untouched by the hover/selected box-shadow rules below.
-   Never color alone: the pin reads "For sale" when no price is known. */
+/* For-sale pins use an outline so the score color still shows through. */
 .marker-pin.for-sale {
   outline: 2px solid var(--pine-mid);
   outline-offset: 1.5px;
@@ -387,7 +382,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   outline-offset: 1px;
 }
 
-/* ─── Parcel Detail Sheet ────────────────────────────────────────────────── */
+/* Parcel Detail Sheet */
 
 .detail-sheet {
   position: absolute;
@@ -421,7 +416,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   flex-shrink: 0;
 }
 
-/* ── Candidate picker ──────────────────────────────────────────────────── */
+/* Candidate picker */
 
 .candidate-picker {
   margin: 0 0 4px;
@@ -548,7 +543,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   text-align: center;
 }
 
-/* ─── Panel tabs ─────────────────────────────────────────────────────────── */
+/* Panel tabs */
 
 .panel-tabs {
   display: flex;
@@ -577,7 +572,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   border-bottom-color: var(--pine-mid);
 }
 
-/* ─── Recent searches dropdown ───────────────────────────────────────────── */
+/* Recent searches dropdown */
 
 .search-box {
   position: relative;
@@ -651,7 +646,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   text-overflow: ellipsis;
 }
 
-/* ─── Saved properties panel ─────────────────────────────────────────────── */
+/* Saved properties panel */
 
 .saved-panel {
   display: flex;
@@ -781,7 +776,6 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   text-overflow: ellipsis;
 }
 
-/* Override close button for detail header context */
 .detail-close-wrap .dl-button {
   color: var(--ink-4);
   margin-left: 12px;
@@ -799,7 +793,6 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   flex-shrink: 0;
 }
 
-/* Full-width save button */
 .detail-actions .dl-button {
   flex: 1;
   justify-content: center;
@@ -814,7 +807,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
 .detail-body::-webkit-scrollbar-track { background: transparent; }
 .detail-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* ─── Detail Sections ────────────────────────────────────────────────────── */
+/* Detail Sections */
 
 .detail-section {
   border-bottom: 1px solid var(--border);
@@ -864,11 +857,11 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
 }
 
 .detail-row-muted { color: var(--ink-3); }
-.detail-dwelling-yes { color: var(--green, #2d7a3a); }
+.detail-dwelling-yes { color: var(--pine-mid); }
 .detail-dwelling-no  { color: var(--ink-3); }
 .detail-dwelling-value { color: var(--ink-3); font-size: 10px; }
 
-/* ─── Water Rights ───────────────────────────────────────────────────────── */
+/* Water Rights */
 
 .water-warning {
   display: flex;
@@ -908,7 +901,6 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   opacity: 0.85;
 }
 
-/* WaterRight card uses design library Card — override internals */
 .wr-card {
   margin-bottom: 10px;
   overflow: hidden;
@@ -929,7 +921,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   color: var(--ink-2);
 }
 
-/* Status badge color overrides */
+/* Water right status badges, applied by class name from the status value. */
 .wr-status-active   { background: #D1EDCE !important; color: #1F5C1B !important; }
 .wr-status-inactive { background: var(--cream-dark) !important; color: var(--ink-4) !important; }
 .wr-status-pending  { background: var(--amber-pale) !important; color: var(--amber) !important; }
@@ -961,54 +953,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   font-weight: 700;
 }
 
-/* ─── Listing Cards ──────────────────────────────────────────────────────── */
-
-.listing-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  text-decoration: none;
-  display: block;
-  color: inherit;
-}
-.listing-card:hover { border-color: var(--pine-mid); box-shadow: var(--shadow-sm); }
-
-.listing-card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.listing-source {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--pine);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.listing-description {
-  font-size: 12px;
-  color: var(--ink-3);
-  line-height: 1.5;
-  margin-bottom: 8px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.listing-date {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--ink-4);
-}
-
-/* ─── Listing Status Check ───────────────────────────────────────────────── */
+/* Listing Status Check */
 
 .listing-status-prompt {
   display: flex;
@@ -1061,9 +1006,8 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   color: var(--ink-4);
 }
 
-/* ─── Insight Cards ──────────────────────────────────────────────────────── */
+/* Insight Cards */
 
-/* Insight cards use design library Card — override internal spacing */
 .insight-callout {
   border-left: 3px solid var(--pine-mid);
   background: var(--pine-pale);
@@ -1091,7 +1035,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   margin-top: 10px;
 }
 
-/* ─── Detail loading/skeleton ────────────────────────────────────────────── */
+/* Detail loading/skeleton */
 
 .skeleton {
   background: var(--cream-dark);
@@ -1104,7 +1048,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   50%       { opacity: 0.5; }
 }
 
-/* ─── Detail empty note ──────────────────────────────────────────────────── */
+/* Detail empty note */
 
 .detail-empty-note {
   font-size: 12px;
@@ -1112,11 +1056,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   padding: 2px 0;
 }
 
-/* ─── Hunting Districts ──────────────────────────────────────────────────── */
-
-/* Reuses .detail-row / .detail-row-label / .detail-row-value — no extra rules needed */
-
-/* ─── Stream Gauge Cards ─────────────────────────────────────────────────── */
+/* Stream Gauge Cards */
 
 .gauge-card {
   border: 1px solid var(--border);
@@ -1237,7 +1177,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   line-height: 1;
 }
 
-/* ─── Road Access ────────────────────────────────────────────────────────── */
+/* Road Access */
 
 .road-access-banner {
   display: flex;
@@ -1274,11 +1214,8 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   font-size: 10px;
   font-weight: 800;
   flex-shrink: 0;
-  /* The icon inherits parent color for background, text is white */
-  filter: none;
 }
 
-/* Make the checkmark/bang white inside colored circle */
 .road-access-ok   .road-access-icon { background: #1F5C1B; color: white; }
 .road-access-warn .road-access-icon { background: var(--amber); color: white; }
 
@@ -1345,9 +1282,13 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   white-space: nowrap;
 }
 
-.road-type-primary  { background: var(--pine-pale);  color: var(--pine); }
+.road-type-primary   { background: var(--pine-pale);  color: var(--pine); }
 .road-type-secondary { background: var(--water-pale); color: var(--water); }
-.road-type-rough    { background: var(--cream-dark);  color: var(--ink-3); }
+.road-type-rough     { background: var(--cream-dark);  color: var(--ink-3); }
+
+.risk-pill-low    { background: var(--pine-pale);   color: var(--pine) !important; }
+.risk-pill-medium { background: var(--amber-pale);  color: var(--amber) !important; }
+.risk-pill-high   { background: var(--danger-pale); color: var(--danger) !important; }
 
 .road-item-right {
   display: flex;
@@ -1377,7 +1318,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   border-top: 1px solid var(--cream-dark);
 }
 
-/* ─── Auth Page ──────────────────────────────────────────────────────────── */
+/* Auth Page */
 
 .auth-page {
   height: 100vh;
@@ -1494,7 +1435,6 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   gap: 16px;
 }
 
-/* Auth submit button full-width */
 .auth-form .dl-button {
   width: 100%;
   justify-content: center;
@@ -1510,7 +1450,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   color: var(--danger);
 }
 
-/* ─── Demo sign-in ───────────────────────────────────────────────────────── */
+/* Demo sign-in */
 
 .auth-demo {
   display: flex;
@@ -1524,7 +1464,6 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   justify-content: center;
 }
 
-/* "or" rule between the sign-in form and the demo button */
 .auth-divider {
   display: flex;
   align-items: center;
@@ -1561,7 +1500,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   gap: 4px;
 }
 
-/* Override ghost button in auth context to look like a text link */
+/* Ghost button styled as a text link */
 .auth-switch .dl-button {
   color: var(--pine);
   font-weight: 600;
@@ -1575,7 +1514,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   color: var(--pine-mid);
 }
 
-/* ─── Preference Filter Panel ────────────────────────────────────────────── */
+/* Preference Filter Panel */
 
 .pref-panel {
   background: var(--cream-mid);
@@ -1640,7 +1579,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   margin-bottom: 9px;
 }
 
-/* ── Acreage range inputs ── */
+/* Acreage range inputs */
 
 .pref-acreage-row {
   display: flex;
@@ -1680,7 +1619,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   flex-shrink: 0;
 }
 
-/* ── Pill toggles ── */
+/* Pill toggles */
 
 .pref-pills {
   display: flex;
@@ -1726,7 +1665,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   line-height: 1;
 }
 
-/* ─── Parcel Rating Card ─────────────────────────────────────────────────── */
+/* Parcel Rating Card */
 
 .rating-card {
   margin: 16px 20px 4px;
@@ -1832,7 +1771,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   line-height: 1.3;
 }
 
-/* ─── Loan Calculator ────────────────────────────────────────────────────── */
+/* Loan Calculator */
 
 .loan-input {
   width: 120px;
@@ -1889,7 +1828,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   line-height: 1.5;
 }
 
-/* ─── Conservation Easements ─────────────────────────────────────────────── */
+/* Conservation Easements */
 
 .easement-card {
   padding: 10px 0;
@@ -1925,7 +1864,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   font-family: var(--font-mono);
 }
 
-/* ─── Map Layer Panel ─────────────────────────────────────────────────────── */
+/* Map Layer Panel */
 
 .layer-panel-wrap {
   position: absolute;
@@ -1992,7 +1931,7 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   cursor: pointer;
 }
 
-/* ─── Bbox Search Button ─────────────────────────────────────────────────── */
+/* Bbox Search Button */
 
 .bbox-search-wrap {
   position: absolute;

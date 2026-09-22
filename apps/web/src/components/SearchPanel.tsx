@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Button, Input } from '@hcsneden/design-library'
-import { useStore } from '../store'
+import { useStore, DEFAULT_PREFERENCES, countActivePreferences } from '../store'
 import type { Preferences } from '../store'
-import { parcelApi } from '../services/api'
+import { parcelApi, warmupApi } from '../services/api'
 import { formatAcreage } from '@lastbestland/shared'
 import type { ParcelCandidate } from '@lastbestland/shared'
 import { SavedPanel } from './SavedPanel'
@@ -15,7 +15,7 @@ const LOOKUP_STATUS_LABELS = [
   'This is taking a moment…',
 ]
 
-// Milliseconds since the lookup began at which each label after the first takes over.
+// Elapsed milliseconds at which each label after the first takes over.
 const LOOKUP_STATUS_ELAPSED_MS = [1800, 4300, 8300]
 
 // A candidate matches a typed acreage/price if it is within 20% of it.
@@ -29,8 +29,25 @@ const ASSESSED_VALUE_FORMAT = new Intl.NumberFormat('en-US', {
 
 const NOT_FOUND_MESSAGE =
   "We couldn't find that parcel. Double-check the address or parcel number, or try just the street name " +
-  '(e.g. "Coyote Dr") — if a few parcels share it, we\'ll help you narrow it down using details from the listing ' +
+  '(for example "Coyote Dr"). If a few parcels share it, you can narrow them down with details from the listing ' +
   '(acreage, price, subdivision name).'
+
+
+/**
+ * Starts an Aurora resume on the first sign that a visitor is about to search.
+ *
+ * Deliberately not on page load: most parcel reads are served from the DynamoDB
+ * cache and never touch Aurora, so waking it for every visitor would keep a
+ * cluster running that should be asleep. Focusing the search box is the earliest
+ * honest signal that a query is coming. Once per page, fire and forget, since a
+ * failure costs nothing and the query retries on its own.
+ */
+let databaseWakeRequested = false
+function wakeDatabaseOnce() {
+  if (databaseWakeRequested) return
+  databaseWakeRequested = true
+  void warmupApi.wakeDatabase()
+}
 
 export function SearchPanel() {
   const { isPanelOpen, isSearching, searchError, lookupCandidates, lookupCandidateRoad, preferences, recentSearches, panelTab } =
@@ -140,10 +157,7 @@ export function SearchPanel() {
     setPreferences({ [key]: !preferences[key] })
   }
 
-  const activePreferenceCount = Object.entries(preferences).filter(([key, value]) => {
-    if (key === 'acreageMin' || key === 'acreageMax') return value !== null
-    return value === true
-  }).length
+  const activePreferenceCount = countActivePreferences(preferences)
 
   return (
     <>
@@ -185,7 +199,10 @@ export function SearchPanel() {
                 placeholder="Address, parcel number, or geocode…"
                 value={query}
                 onChange={(changeEvent: React.ChangeEvent<HTMLInputElement>) => setQuery(changeEvent.target.value)}
-                onFocus={() => setIsRecentDropdownOpen(true)}
+                onFocus={() => {
+                  setIsRecentDropdownOpen(true)
+                  wakeDatabaseOnce()
+                }}
                 disabled={isSearching}
               />
             </form>
@@ -242,7 +259,6 @@ export function SearchPanel() {
           </div>
         )}
 
-        {/* ── TBD Candidate Picker ── */}
         {lookupCandidates && (
           <CandidatePicker
             candidates={lookupCandidates}
@@ -263,7 +279,6 @@ export function SearchPanel() {
           />
         )}
 
-        {/* ── Preferences ── */}
         <div className="pref-panel">
           <div className="pref-panel-header">
             <div>
@@ -273,13 +288,7 @@ export function SearchPanel() {
             {activePreferenceCount > 0 && (
               <button
                 className="pref-clear-btn"
-                onClick={() => setPreferences({
-                  acreageMin: null, acreageMax: null,
-                  waterRights: false, streamAccess: false,
-                  maintainedRoad: false, huntingAccess: false,
-                  electricGrid: false, broadband: false,
-                  lowFloodRisk: false, lowWildfireRisk: false, noMineSites: false,
-                })}
+                onClick={() => setPreferences(DEFAULT_PREFERENCES)}
               >
                 Clear {activePreferenceCount}
               </button>
@@ -294,7 +303,7 @@ export function SearchPanel() {
                 value={preferences.acreageMin}
                 onChange={(v) => setPreferences({ acreageMin: v })}
               />
-              <span className="pref-acreage-dash">—</span>
+              <span className="pref-acreage-dash">to</span>
               <AcreageInput
                 placeholder="Max"
                 value={preferences.acreageMax}
@@ -324,7 +333,6 @@ export function SearchPanel() {
             <div className="pref-group-label">Infrastructure</div>
             <div className="pref-pills">
               <PrefPill label="Electric grid" active={preferences.electricGrid} onClick={() => togglePreference('electricGrid')} />
-              <PrefPill label="Broadband" active={preferences.broadband} onClick={() => togglePreference('broadband')} />
             </div>
           </div>
 

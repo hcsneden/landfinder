@@ -2,12 +2,13 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { useStore } from '../store'
+import { useStore, countActivePreferences } from '../store'
 import { formatPrice } from '@lastbestland/shared'
 import type { SearchResult } from '@lastbestland/shared'
+import type { Preferences } from '../store'
 import { searchApi } from '../services/api'
 
-// CARTO Voyager — free, no API key required
+// CARTO Voyager basemap. Free with attribution and needs no API key.
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
 
 const WMS_RASTER_LAYERS = [
@@ -43,6 +44,32 @@ function formatCompactPrice(price: number): string {
   if (price >= 1_000_000) return `$${(price / 1_000_000).toFixed(1)}M`
   if (price >= 1_000) return `$${Math.round(price / 1_000)}K`
   return formatPrice(price)
+}
+
+function markerScoreClass(result: SearchResult, preferences: Preferences): string {
+  if (countActivePreferences(preferences) === 0) return result.hasWaterRights ? 'has-water' : 'no-water'
+
+  let criteriaMet = 0
+  let criteriaChecked = 0
+  const { acreage } = result.parcel
+
+  if (preferences.acreageMin !== null || preferences.acreageMax !== null) {
+    criteriaChecked++
+    const meetsMinimum = preferences.acreageMin === null || (acreage !== null && acreage >= preferences.acreageMin)
+    const meetsMaximum = preferences.acreageMax === null || (acreage !== null && acreage <= preferences.acreageMax)
+    if (meetsMinimum && meetsMaximum) criteriaMet++
+  }
+  if (preferences.waterRights) {
+    criteriaChecked++
+    if (result.hasWaterRights) criteriaMet++
+  }
+
+  if (criteriaChecked === 0) return 'score-unknown'
+  const fractionMet = criteriaMet / criteriaChecked
+  if (fractionMet === 1) return 'score-excellent'
+  if (fractionMet >= 0.67) return 'score-good'
+  if (fractionMet >= 0.34) return 'score-partial'
+  return 'score-poor'
 }
 
 export function MapView() {
@@ -83,7 +110,6 @@ export function MapView() {
   const [styleLoaded, setStyleLoaded] = useState(false)
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Initialize map once
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
 
@@ -160,40 +186,8 @@ export function MapView() {
     map.addLayer({ id: 'parcel-outline', type: 'line', source: 'parcel-boundary-src', paint: { 'line-color': '#f59e0b', 'line-width': 2.5 } })
   }, [styleLoaded, selectedParcelBoundary, activeLayers])
 
-  const hasAnyPreferenceSet =
-    preferences.acreageMin !== null || preferences.acreageMax !== null ||
-    preferences.waterRights || preferences.streamAccess || preferences.maintainedRoad ||
-    preferences.huntingAccess || preferences.electricGrid || preferences.broadband ||
-    preferences.lowFloodRisk || preferences.lowWildfireRisk || preferences.noMineSites
-
-  function getMarkerScoreClass(result: SearchResult): string {
-    if (!hasAnyPreferenceSet) return result.hasWaterRights ? 'has-water' : 'no-water'
-
-    let criteriaMet = 0
-    let criteriaChecked = 0
-    const { acreage } = result.parcel
-
-    if (preferences.acreageMin !== null || preferences.acreageMax !== null) {
-      criteriaChecked++
-      const meetsMinimum = preferences.acreageMin === null || (acreage !== null && acreage >= preferences.acreageMin)
-      const meetsMaximum = preferences.acreageMax === null || (acreage !== null && acreage <= preferences.acreageMax)
-      if (meetsMinimum && meetsMaximum) criteriaMet++
-    }
-    if (preferences.waterRights) {
-      criteriaChecked++
-      if (result.hasWaterRights) criteriaMet++
-    }
-
-    if (criteriaChecked === 0) return 'score-unknown'
-    const fractionMet = criteriaMet / criteriaChecked
-    if (fractionMet === 1) return 'score-excellent'
-    if (fractionMet >= 0.67) return 'score-good'
-    if (fractionMet >= 0.34) return 'score-partial'
-    return 'score-poor'
-  }
-
-  // Selected/hovered styling is applied by the effect below rather than here, so that
-  // hovering a marker never rebuilds the DOM or re-fits the map bounds.
+  // Selected and hovered styling is applied by the next effect so that hovering
+  // a marker never rebuilds the markers or refits the map.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -213,16 +207,14 @@ export function MapView() {
       const { longitude, latitude } = coordinates
       foundAnyCoordinates = true
 
-      // No listing feed, so the price on the pin usually comes from the per-parcel
-      // for-sale check rather than from a listing row.
-      const price = result.listing?.price ?? result.listingStatus?.price ?? null
+      const price = result.listingStatus?.price ?? null
       const isForSale = result.listingStatus?.forSale ?? false
 
       const markerElement = document.createElement('div')
       markerElement.className = 'map-marker'
 
       const pinElement = document.createElement('div')
-      pinElement.className = `marker-pin ${getMarkerScoreClass(result)}${isForSale ? ' for-sale' : ''}`
+      pinElement.className = `marker-pin ${markerScoreClass(result, preferences)}${isForSale ? ' for-sale' : ''}`
       pinElement.textContent = price ? formatCompactPrice(price) : isForSale ? 'For sale' : '—'
       if (isForSale) {
         pinElement.title = result.listingStatus?.source
@@ -252,9 +244,8 @@ export function MapView() {
     if (foundAnyCoordinates) {
       map.fitBounds(bounds, { padding: 80, maxZoom: 13, duration: 600 })
     }
-  }, [searchResults, preferences, hasAnyPreferenceSet])
+  }, [searchResults, preferences])
 
-  // Declared after the effect above so a freshly built marker set is styled in the same commit.
   useEffect(() => {
     for (const { element, parcelId } of markersRef.current) {
       element.classList.toggle('selected', parcelId === selectedParcelId)
@@ -262,7 +253,6 @@ export function MapView() {
     }
   }, [searchResults, selectedParcelId, hoveredParcelId])
 
-  // Fly to selected parcel
   useEffect(() => {
     const map = mapRef.current
     if (!map || !selectedParcelId) return
@@ -276,8 +266,6 @@ export function MapView() {
       duration: 500,
     })
   }, [selectedParcelId, searchResults])
-
-  // ── Draw mode ──────────────────────────────────────────────────────────────
 
   const handleMouseDown = useCallback(
     (mouseEvent: maplibregl.MapMouseEvent) => {
@@ -353,6 +341,7 @@ export function MapView() {
     const jobId = submitResponse.data.id
     let pollAttempts = 0
 
+    // The job completes asynchronously. Results come back empty until it does.
     const pollForResults = async () => {
       pollAttempts++
       if (pollAttempts > MAX_POLL_ATTEMPTS) {
@@ -360,8 +349,8 @@ export function MapView() {
         return
       }
       const resultsResponse = await searchApi.getSearchResults(jobId)
-      if (resultsResponse.success && resultsResponse.data) {
-        setSearchResults(resultsResponse.data.items, jobId)
+      if (resultsResponse.success && resultsResponse.data && resultsResponse.data.totalCount > 0) {
+        setSearchResults(resultsResponse.data.items)
         stopSearching()
       } else {
         pollTimeoutRef.current = setTimeout(pollForResults, POLL_INTERVAL_MS)

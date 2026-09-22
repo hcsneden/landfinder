@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	censusOnelineURL   = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+	censusOnelineURL    = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 	censusStructuredURL = "https://geocoding.geo.census.gov/geocoder/locations/address"
-	nominatimURL       = "https://nominatim.openstreetmap.org/search"
+	nominatimURL        = "https://nominatim.openstreetmap.org/search"
 )
 
 // Geocoder resolves free-text addresses to coordinates via a cascade of

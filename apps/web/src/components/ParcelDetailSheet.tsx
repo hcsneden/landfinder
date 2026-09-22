@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, CardContent, Badge, Typography } from '@hcsneden/design-library'
-import { useStore } from '../store'
+import { Button, Card, Badge, Typography } from '@hcsneden/design-library'
+import { useStore, countActivePreferences } from '../store'
 import type { Preferences } from '../store'
-import { parcelApi, userApi } from '../services/api'
+import { parcelApi, userApi, unwrap } from '../services/api'
 import {
   formatAcreage,
   formatDate,
@@ -12,15 +13,13 @@ import {
   formatFlowRate,
   formatVolume,
   formatPrice,
-  formatPricePerAcre,
-  getListingSourceLabel,
+  isMaintainedRoad,
+  isPublicRoad,
 } from '@lastbestland/shared'
-import type { WaterRight, Listing, ParcelInsight, HuntingDistrict, StreamGauge, RoadAccess, RoadSegment, UtilityAccess, BroadbandProvider, EnvironmentalRisk, FloodZone, WildfireRiskRating, MineSite, ConservationEasement, ListingStatus } from '@lastbestland/shared'
-
-function unwrap<T>(r: { success: boolean; data?: T; error?: { message?: string } }): T {
-  if (!r.success || !r.data) throw new Error(r.error?.message)
-  return r.data
-}
+import type {
+  WaterRight, ParcelInsight, HuntingDistrict, StreamGauge, RoadAccess, RoadSegment, UtilityAccess,
+  EnvironmentalRisk, FloodZone, WildfireRiskRating, MineSite, ConservationEasement, ListingStatus,
+} from '@lastbestland/shared'
 
 export function ParcelDetailSheet() {
   const { selectedParcelId, isDetailOpen, searchResults, preferences } = useStore(
@@ -36,105 +35,59 @@ export function ParcelDetailSheet() {
   const queryClient = useQueryClient()
 
   const resultPreview = searchResults.find((result) => result.parcel.id === selectedParcelId)
+  const parcelId = selectedParcelId ?? ''
+  const enabled = Boolean(selectedParcelId)
 
-  const parcelQuery = useQuery({
-    queryKey: ['parcel', selectedParcelId],
-    queryFn: () => parcelApi.getParcel(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
+  const parcelQuery = useQuery({ queryKey: ['parcel', parcelId], queryFn: () => parcelApi.getParcel(parcelId).then(unwrap), enabled })
+  const waterQuery = useQuery({ queryKey: ['water', parcelId], queryFn: () => parcelApi.getWaterRights(parcelId).then(unwrap), enabled })
+  const huntingQuery = useQuery({ queryKey: ['hunting', parcelId], queryFn: () => parcelApi.getHuntingDistricts(parcelId).then(unwrap), enabled })
+  const gaugesQuery = useQuery({ queryKey: ['gauges', parcelId], queryFn: () => parcelApi.getStreamGauges(parcelId).then(unwrap), enabled })
+  const roadQuery = useQuery({ queryKey: ['road-access', parcelId], queryFn: () => parcelApi.getRoadAccess(parcelId).then(unwrap), enabled })
+  const utilitiesQuery = useQuery({ queryKey: ['utilities', parcelId], queryFn: () => parcelApi.getUtilities(parcelId).then(unwrap), enabled })
+  const envRiskQuery = useQuery({ queryKey: ['environmental-risk', parcelId], queryFn: () => parcelApi.getEnvironmentalRisk(parcelId).then(unwrap), enabled })
+  const easementQuery = useQuery({ queryKey: ['conservation-easements', parcelId], queryFn: () => parcelApi.getConservationEasements(parcelId).then(unwrap), enabled })
 
-  const waterQuery = useQuery({
-    queryKey: ['water', selectedParcelId],
-    queryFn: () => parcelApi.getWaterRights(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
-  const huntingQuery = useQuery({
-    queryKey: ['hunting', selectedParcelId],
-    queryFn: () => parcelApi.getHuntingDistricts(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
-  const gaugesQuery = useQuery({
-    queryKey: ['gauges', selectedParcelId],
-    queryFn: () => parcelApi.getStreamGauges(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
-  const roadQuery = useQuery({
-    queryKey: ['road-access', selectedParcelId],
-    queryFn: () => parcelApi.getRoadAccess(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
-  const utilitiesQuery = useQuery({
-    queryKey: ['utilities', selectedParcelId],
-    queryFn: () => parcelApi.getUtilities(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
-  const envRiskQuery = useQuery({
-    queryKey: ['environmental-risk', selectedParcelId],
-    queryFn: () => parcelApi.getEnvironmentalRisk(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
-  const listingsQuery = useQuery({
-    queryKey: ['listings', selectedParcelId],
-    queryFn: () => parcelApi.getListings(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
-  const easementQuery = useQuery({
-    queryKey: ['conservation-easements', selectedParcelId],
-    queryFn: () => parcelApi.getConservationEasements(selectedParcelId!).then(unwrap),
-    enabled: !!selectedParcelId,
-  })
-
+  // The summary is generated from the other sources, so it waits for them to
+  // settle and their caches to be warm.
   const insightsQuery = useQuery({
-    queryKey: ['insights', selectedParcelId],
-    queryFn: () => parcelApi.getInsights(selectedParcelId!).then(unwrap),
-    // Wait for the data that feeds the summary before firing, so the backend
-    // always has warm caches when it generates the insight.
-    enabled: !!selectedParcelId &&
-      !waterQuery.isLoading &&
-      !roadQuery.isLoading &&
-      !utilitiesQuery.isLoading &&
-      !envRiskQuery.isLoading &&
-      !easementQuery.isLoading,
+    queryKey: ['insights', parcelId],
+    queryFn: () => parcelApi.getInsights(parcelId).then(unwrap),
+    enabled: enabled && !waterQuery.isLoading && !roadQuery.isLoading && !utilitiesQuery.isLoading && !envRiskQuery.isLoading && !easementQuery.isLoading,
   })
+
+  const navigate = useNavigate()
+  const isSignedIn = useStore((state) => state.tokens !== null)
 
   const saveMutation = useMutation({
-    mutationFn: () => userApi.saveParcel(selectedParcelId!),
+    mutationFn: () => userApi.saveParcel(parcelId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['savedParcels'] }),
   })
 
-  // On-demand, not auto-run on open — each check is a Claude + web-search call.
-  const listingStatusMutation = useMutation({
-    mutationFn: () => parcelApi.checkListingStatus(selectedParcelId!).then(unwrap),
-  })
+  // Saving is the one action that needs an account. Send the visitor to sign in
+  // and bring them back to this parcel, so they do not lose their place.
+  const handleSave = () => {
+    if (!isSignedIn) {
+      navigate(`/auth?next=${encodeURIComponent(`/parcel/${parcelId}`)}`)
+      return
+    }
+    saveMutation.mutate()
+  }
 
   const parcel = parcelQuery.data
   const acreage = parcel?.acreage ?? resultPreview?.parcel.acreage ?? null
-  const location = parcel?.address
-    ?? (parcel ? `${parcel.county ?? 'Unknown'} County, MT` : null)
-    ?? (resultPreview ? `${resultPreview.parcel.county ?? 'Unknown'} County, MT` : null)
-
-  const waterRights: WaterRight[] = waterQuery.data ?? []
-  const insights: ParcelInsight[] = insightsQuery.data ?? []
+  const county = parcel?.county ?? resultPreview?.parcel.county
+  const location = parcel?.address ?? (county !== undefined ? `${county ?? 'Unknown'} County, MT` : null)
+  const waterRights = waterQuery.data ?? []
+  const insights = insightsQuery.data ?? []
+  const easements = easementQuery.data?.easements ?? []
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDetailOpen(false)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDetailOpen(false)
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [setDetailOpen])
-
-  useEffect(() => {
-    listingStatusMutation.reset()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedParcelId])
 
   useEffect(() => {
     setSelectedParcelBoundary(parcelQuery.data?.boundary ?? null)
@@ -143,39 +96,28 @@ export function ParcelDetailSheet() {
 
   return (
     <aside className={`detail-sheet ${isDetailOpen ? 'open' : ''}`}>
-      {/* ── Header ── */}
       <div className="detail-header">
         <div className="detail-header-info">
           <div className="detail-acres">{formatAcreage(acreage)}</div>
           {location && <div className="detail-location">{location}</div>}
         </div>
         <div className="detail-close-wrap">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setDetailOpen(false)}
-            title="Close (Esc)"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} title="Close (Esc)">
             ×
           </Button>
         </div>
       </div>
 
-      {/* ── Actions ── */}
       <div className="detail-actions">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-        >
-          {saveMutation.isPending ? (
-            <span className="spinner" />
-          ) : saveMutation.isSuccess ? '✓ Saved' : '♡ Save parcel'}
+        <Button variant="primary" size="sm" onClick={handleSave} disabled={saveMutation.isPending}>
+          {saveMutation.isPending
+            ? <span className="spinner" />
+            : saveMutation.isSuccess ? 'Saved'
+            : isSignedIn ? 'Save parcel'
+            : 'Sign in to save'}
         </Button>
       </div>
 
-      {/* ── Loading status ── */}
       <LoadingStatus
         parcelLoading={parcelQuery.isLoading}
         waterLoading={waterQuery.isLoading}
@@ -185,12 +127,10 @@ export function ParcelDetailSheet() {
         insightsLoading={insightsQuery.isLoading}
       />
 
-      {/* ── Body ── */}
       <div className="detail-body">
-        {/* Parcel Rating */}
         <ParcelRating
           preferences={preferences}
-          parcel={parcel}
+          acreage={parcel?.acreage ?? null}
           waterRights={waterRights}
           huntingData={huntingQuery.data ?? null}
           gauges={gaugesQuery.data ?? null}
@@ -203,206 +143,113 @@ export function ParcelDetailSheet() {
           }
         />
 
-        {/* Buildability Summary */}
         {(insightsQuery.isLoading || insights.length > 0) && (
-          <div className="detail-section">
-            <div className="section-title">Buildability Summary</div>
-            {insightsQuery.isLoading ? (
-              <LoadingSkeleton rows={4} />
-            ) : (
-              insights.map((insight) => <InsightCard key={insight.id} insight={insight} />)
-            )}
-          </div>
+          <Section title="Buildability summary">
+            {insightsQuery.isLoading
+              ? <LoadingSkeleton rows={4} />
+              : insights.map((insight) => <InsightCard key={insight.id} insight={insight} />)}
+          </Section>
         )}
 
-        {/* Property Details */}
         {parcel && (
-          <div className="detail-section">
-            <div className="section-title">Property Details</div>
-            <div className="detail-row">
-              <span className="detail-row-label">Parcel Number</span>
-              <span className="detail-row-value">{parcel.parcelNumber ?? 'N/A'}</span>
-            </div>
-            <div className="detail-row">
-              <span className="detail-row-label">Geocode</span>
-              <span className="detail-row-value">{parcel.geoId ?? 'N/A'}</span>
-            </div>
-            <div className="detail-row">
-              <span className="detail-row-label">County</span>
-              <span className="detail-row-value">{parcel.county ?? 'N/A'}</span>
-            </div>
-            <div className="detail-row">
-              <span className="detail-row-label">State</span>
-              <span className="detail-row-value">Montana</span>
-            </div>
-            <div className="detail-row">
-              <span className="detail-row-label">Acreage</span>
-              <span className="detail-row-value">{formatAcreage(parcel.acreage)}</span>
-            </div>
-            <div className="detail-row">
-              <span className="detail-row-label">Dwelling</span>
-              <span className="detail-row-value">
-                {parcel.propType == null ? (
-                  <span className="detail-row-muted">Unknown</span>
-                ) : parcel.propType === 'Improved Property' ? (
-                  <span className="detail-dwelling-yes">
-                    Yes
-                    {parcel.buildingValue != null && (
-                      <span className="detail-dwelling-value">
-                        {' '}· ${parcel.buildingValue.toLocaleString()} assessed
-                      </span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="detail-dwelling-no">None on record</span>
-                )}
-              </span>
-            </div>
-            <div className="detail-row">
-              <span className="detail-row-label">Coordinates</span>
-              <span className="detail-row-value">
-                {parcel.coordinates
-                  ? `${parcel.coordinates.latitude.toFixed(5)}, ${parcel.coordinates.longitude.toFixed(5)}`
-                  : 'N/A'}
-              </span>
-            </div>
-          </div>
+          <Section title="Property details">
+            <DetailRow label="Parcel number" value={parcel.parcelNumber ?? 'N/A'} />
+            <DetailRow label="Geocode" value={parcel.geoId ?? 'N/A'} />
+            <DetailRow label="County" value={parcel.county ?? 'N/A'} />
+            <DetailRow label="State" value="Montana" />
+            <DetailRow label="Acreage" value={formatAcreage(parcel.acreage)} />
+            <DetailRow label="Dwelling" value={<DwellingValue propType={parcel.propType} buildingValue={parcel.buildingValue} />} />
+            <DetailRow
+              label="Coordinates"
+              value={parcel.coordinates ? `${parcel.coordinates.latitude.toFixed(5)}, ${parcel.coordinates.longitude.toFixed(5)}` : 'N/A'}
+            />
+          </Section>
         )}
 
-        {/* Listings */}
-        {(listingsQuery.isLoading || (listingsQuery.data?.length ?? 0) > 0) && (
-          <div className="detail-section">
-            <div className="section-title">Listings</div>
-            {listingsQuery.isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : (
-              listingsQuery.data!.map((listing) => <ListingCard key={listing.id} listing={listing} acreage={acreage} />)
-            )}
-          </div>
-        )}
+        <Section title="Is this for sale?">
+          <ListingStatusSection key={parcelId} parcelId={parcelId} />
+        </Section>
 
-        {/* Is this for sale? */}
-        <div className="detail-section">
-          <div className="section-title">Is this for sale?</div>
-          <ListingStatusSection
-            status={listingStatusMutation.data ?? null}
-            isPending={listingStatusMutation.isPending}
-            isError={listingStatusMutation.isError}
-            onCheck={() => listingStatusMutation.mutate()}
-          />
-        </div>
+        <Section title="Loan calculator">
+          <LoanCalculator key={parcelId} />
+        </Section>
 
-        {/* Loan Calculator */}
-        <div className="detail-section">
-          <div className="section-title">Loan Calculator</div>
-          <LoanCalculator listingPrice={listingsQuery.data?.[0]?.price ?? listingStatusMutation.data?.price ?? null} />
-        </div>
-
-        {/* Water Rights */}
-        <div className="detail-section">
-          <div className="section-title">Water Rights</div>
-
+        <Section title="Water rights">
           {waterQuery.isLoading ? (
             <LoadingSkeleton rows={3} />
           ) : waterRights.length === 0 ? (
             <div className="water-warning">
               <div className="water-warning-icon">!</div>
               <div>
-                <div className="water-warning-title">No Water Rights on File</div>
+                <div className="water-warning-title">No water rights on file</div>
                 <div className="water-warning-body">
                   This parcel has no documented water rights in the Montana DNRC database.
                   Verify water access with county records and consult a water rights attorney
-                  before purchase. In Montana, no right = no water in dry years.
+                  before purchase. In Montana, no right means no water in dry years.
                 </div>
               </div>
             </div>
           ) : (
             waterRights.map((waterRight) => <WaterRightCard key={waterRight.id} waterRight={waterRight} />)
           )}
-        </div>
+        </Section>
 
-        {/* Hunting Districts */}
-        <div className="detail-section">
-          <div className="section-title">Hunting Districts</div>
+        <Section title="Hunting districts">
           {huntingQuery.isLoading ? (
             <LoadingSkeleton rows={2} />
-          ) : (huntingQuery.data?.length ?? 0) > 0 ? (
-            <HuntingDistrictsSection districts={huntingQuery.data!} />
+          ) : huntingQuery.data?.length ? (
+            <HuntingDistrictsSection districts={huntingQuery.data} />
           ) : (
             <div className="detail-empty-note">No hunting districts overlap this parcel</div>
           )}
-        </div>
+        </Section>
 
-        {/* Stream Gauges */}
-        <div className="detail-section">
-          <div className="section-title">Nearby Stream Gauges</div>
+        <Section title="Nearby stream gauges">
           {gaugesQuery.isLoading ? (
             <LoadingSkeleton rows={3} />
-          ) : (gaugesQuery.data?.length ?? 0) > 0 ? (
-            gaugesQuery.data!.map((gauge) => <StreamGaugeCard key={gauge.id} gauge={gauge} />)
+          ) : gaugesQuery.data?.length ? (
+            gaugesQuery.data.map((gauge) => <StreamGaugeCard key={gauge.id} gauge={gauge} />)
           ) : (
             <div className="detail-empty-note">No USGS gauges within 50 miles</div>
           )}
-        </div>
+        </Section>
 
-        {/* Road & Legal Access */}
-        <div className="detail-section">
-          <div className="section-title">Road & Legal Access</div>
-          {roadQuery.isLoading ? (
-            <LoadingSkeleton rows={3} />
-          ) : roadQuery.data && !roadQuery.isError ? (
-            <RoadAccessSection access={roadQuery.data} />
-          ) : (
-            <div className="detail-empty-note">Road access data unavailable</div>
-          )}
-        </div>
+        <Section title="Road and legal access">
+          {roadQuery.isLoading ? <LoadingSkeleton rows={3} />
+            : roadQuery.data ? <RoadAccessSection access={roadQuery.data} />
+            : <div className="detail-empty-note">Road access data unavailable</div>}
+        </Section>
 
-        {/* Utility Access */}
-        <div className="detail-section">
-          <div className="section-title">Utilities & Grid Access</div>
-          {utilitiesQuery.isLoading ? (
-            <LoadingSkeleton rows={3} />
-          ) : utilitiesQuery.data && !utilitiesQuery.isError ? (
-            <UtilityAccessSection access={utilitiesQuery.data} />
-          ) : (
-            <div className="detail-empty-note">Utility data unavailable</div>
-          )}
-        </div>
+        <Section title="Utilities and grid access">
+          {utilitiesQuery.isLoading ? <LoadingSkeleton rows={3} />
+            : utilitiesQuery.data ? <UtilityAccessSection access={utilitiesQuery.data} />
+            : <div className="detail-empty-note">Utility data unavailable</div>}
+        </Section>
 
-        {/* Environmental */}
-        <div className="detail-section">
-          <div className="section-title">Environmental & Risk</div>
-          {envRiskQuery.isLoading ? (
-            <LoadingSkeleton rows={4} />
-          ) : envRiskQuery.data && !envRiskQuery.isError ? (
-            <EnvironmentalRiskSection risk={envRiskQuery.data} />
-          ) : (
-            <div className="detail-empty-note">Environmental data unavailable</div>
-          )}
-        </div>
+        <Section title="Environmental and risk">
+          {envRiskQuery.isLoading ? <LoadingSkeleton rows={4} />
+            : envRiskQuery.data ? <EnvironmentalRiskSection risk={envRiskQuery.data} />
+            : <div className="detail-empty-note">Environmental data unavailable</div>}
+        </Section>
 
-        {/* Conservation Easements */}
-        <div className="detail-section">
-          <div className="section-title">Conservation Easements</div>
+        <Section title="Conservation easements">
           {easementQuery.isLoading ? (
             <LoadingSkeleton rows={3} />
-          ) : easementQuery.data && easementQuery.data.length > 0 ? (
-            <ConservationEasementSection easements={easementQuery.data} />
+          ) : easements.length > 0 ? (
+            <ConservationEasementSection easements={easements} />
           ) : (
-            <div className="road-access-banner road-access-ok">
-              <span className="road-access-icon">✓</span>
+            <Banner tone="ok">
               No conservation easements found in the NCED database
               <div className="road-access-note" style={{ marginTop: 6 }}>
-                Verify with county deed records — easements may exist outside this database.
+                Verify with county deed records. Easements may exist outside this database.
               </div>
-            </div>
+            </Banner>
           )}
-        </div>
+        </Section>
 
-        {/* Data disclaimer */}
         <div style={{ padding: '16px 20px' }}>
           <Typography variant="caption" muted>
-            Data sourced from Montana DNRC, Montana Cadastral, and public listing aggregators.
+            Data sourced from Montana DNRC, Montana Cadastral, and federal GIS services.
             Last Best Land does not guarantee accuracy. Verify water rights, access, and encumbrances
             through county records and a licensed real estate attorney before purchase.
           </Typography>
@@ -412,13 +259,69 @@ export function ParcelDetailSheet() {
   )
 }
 
-type RatingItem = { key: string; label: string; met: boolean | null; note: string }
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="detail-section">
+      <div className="section-title">{title}</div>
+      {children}
+    </div>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="detail-row">
+      <span className="detail-row-label">{label}</span>
+      <span className="detail-row-value">{value}</span>
+    </div>
+  )
+}
+
+function Banner({ tone, children }: { tone: 'ok' | 'warn' | 'neutral'; children: React.ReactNode }) {
+  const toneClass = tone === 'ok' ? 'road-access-ok' : tone === 'warn' ? 'road-access-warn' : ''
+  return (
+    <div className={`road-access-banner ${toneClass}`}>
+      <span className="road-access-icon">{tone === 'ok' ? '✓' : tone === 'warn' ? '!' : '?'}</span>
+      <div>{children}</div>
+    </div>
+  )
+}
+
+function DwellingValue({ propType, buildingValue }: { propType: string | null; buildingValue: number | null }) {
+  if (propType === null) return <span className="detail-row-muted">Unknown</span>
+  if (propType !== 'Improved Property') return <span className="detail-dwelling-no">None on record</span>
+  return (
+    <span className="detail-dwelling-yes">
+      Yes
+      {buildingValue !== null && <span className="detail-dwelling-value"> · {formatPrice(buildingValue)} assessed</span>}
+    </span>
+  )
+}
+
+interface RatingItem {
+  key: string
+  label: string
+  /** Null while loading or when the source cannot answer. */
+  met: boolean | null
+  note: string
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function ratingLabel(fraction: number): { label: string; className: string } {
+  if (fraction === 1) return { label: 'Strong match', className: 'rating-excellent' }
+  if (fraction >= 0.67) return { label: 'Good match', className: 'rating-good' }
+  if (fraction >= 0.34) return { label: 'Partial match', className: 'rating-partial' }
+  return { label: 'Low match', className: 'rating-poor' }
+}
 
 function ParcelRating({
-  preferences, parcel, waterRights, huntingData, gauges, roadAccess, utilities, envRisk, loading,
+  preferences, acreage, waterRights, huntingData, gauges, roadAccess, utilities, envRisk, loading,
 }: {
   preferences: Preferences
-  parcel: { acreage: number | null } | null | undefined
+  acreage: number | null
   waterRights: WaterRight[]
   huntingData: HuntingDistrict[] | null
   gauges: StreamGauge[] | null
@@ -427,153 +330,119 @@ function ParcelRating({
   envRisk: EnvironmentalRisk | null
   loading: boolean
 }) {
-  // Normalize: stale localStorage from an old preference shape may leave fields as
-  // undefined rather than null. Coerce here so all downstream checks are safe.
-  const p = {
-    ...preferences,
-    acreageMin: preferences.acreageMin ?? null,
-    acreageMax: preferences.acreageMax ?? null,
-  }
+  if (countActivePreferences(preferences) === 0) return null
 
-  const anyEnabled =
-    p.acreageMin !== null || p.acreageMax !== null ||
-    p.waterRights || p.streamAccess || p.maintainedRoad || p.huntingAccess ||
-    p.electricGrid || p.broadband || p.lowFloodRisk || p.lowWildfireRisk || p.noMineSites
-
-  if (!anyEnabled) return null
-
-  const acres = parcel?.acreage ?? null
   const activeWater = waterRights.filter((waterRight) => waterRight.status === 'active')
   const huntingSpecies = [...new Set((huntingData ?? []).map((district) => district.species))]
-  const maintained = (roadAccess?.segments ?? []).filter(
-    (segment) => segment.type === "highway" || segment.type === "county" || segment.type === "local"
-  )
+  const maintained = (roadAccess?.segments ?? []).filter((segment) => isMaintainedRoad(segment.type))
   const hasSFHA = (envRisk?.floodZones ?? []).some((zone) => zone.isSpecialFloodHazardArea)
   const floodRiskLevel = envRisk?.floodZones[0]?.riskLevel ?? null
   const wildfireRisk = envRisk?.wildfireRisk ?? null
   const mineSiteCount = envRisk?.mineSites.length ?? 0
+  const electric = utilities?.electric
+  const pending = { met: null, note: '' }
 
   const items: RatingItem[] = []
-
-  if (p.acreageMin !== null || p.acreageMax !== null) {
-    const minOk = p.acreageMin === null || (acres !== null && acres >= p.acreageMin)
-    const maxOk = p.acreageMax === null || (acres !== null && acres <= p.acreageMax)
-    const label = p.acreageMin !== null && p.acreageMax !== null
-      ? `${p.acreageMin.toLocaleString()}–${p.acreageMax.toLocaleString()} acres`
-      : p.acreageMin !== null ? `At least ${p.acreageMin.toLocaleString()} acres`
-      : `At most ${p.acreageMax!.toLocaleString()} acres`
+  const { acreageMin, acreageMax } = preferences
+  if (acreageMin !== null || acreageMax !== null) {
+    const label = acreageMin !== null && acreageMax !== null
+      ? `${acreageMin.toLocaleString()} to ${acreageMax.toLocaleString()} acres`
+      : acreageMin !== null ? `At least ${acreageMin.toLocaleString()} acres`
+      : `At most ${acreageMax!.toLocaleString()} acres`
+    const meets = acreage !== null && (acreageMin === null || acreage >= acreageMin) && (acreageMax === null || acreage <= acreageMax)
+    items.push({ key: 'acreage', label, ...(loading || acreage === null ? pending : { met: meets, note: `${acreage.toLocaleString()} ac` }) })
+  }
+  if (preferences.waterRights) {
     items.push({
-      key: 'acreage', label,
-      met: loading || acres === null ? null : minOk && maxOk,
-      note: loading || acres === null ? '' : `${acres.toLocaleString()} ac`,
+      key: 'water-rights', label: 'Water rights',
+      ...(loading ? pending : {
+        met: activeWater.length > 0,
+        note: activeWater.length > 0 ? `${activeWater.length} active right${activeWater.length > 1 ? 's' : ''}` : 'None on file',
+      }),
     })
   }
-  if (p.waterRights) items.push({
-    key: 'water-rights', label: 'Water rights',
-    met: loading ? null : activeWater.length > 0,
-    note: loading ? '' : activeWater.length > 0
-      ? `${activeWater.length} active right${activeWater.length > 1 ? 's' : ''}`
-      : 'None on file',
-  })
-  if (p.streamAccess) items.push({
-    key: 'stream', label: 'Stream access',
-    met: loading ? null : (gauges ?? []).length > 0,
-    note: loading ? '' : (gauges ?? []).length > 0
-      ? gauges![0]!.streamName ?? 'Nearby stream'
-      : 'None within 50 mi',
-  })
-  if (p.maintainedRoad) items.push({
-    key: 'road', label: 'Maintained road',
-    met: loading ? null : maintained.length > 0,
-    note: loading ? '' : maintained.length > 0
-      ? maintained[0]!.name ?? ROAD_TYPE_LABELS[maintained[0]!.type] ?? 'Road'
-      : 'None detected',
-  })
-  if (p.huntingAccess) items.push({
-    key: 'hunting', label: 'Hunting districts',
-    met: loading ? null : huntingSpecies.length > 0,
-    note: loading ? '' : huntingSpecies.length > 0
-      ? huntingSpecies.map((species) => species.charAt(0).toUpperCase() + species.slice(1)).join(', ')
-      : 'No districts overlap',
-  })
-  if (p.electricGrid) {
-    const elec = utilities?.electric
-    const gridConnected = elec?.hasNearbyLine || elec?.serviceTerritory != null
+  if (preferences.streamAccess) {
+    const nearest = gauges?.[0]
+    items.push({
+      key: 'stream', label: 'Stream access',
+      ...(loading ? pending : { met: Boolean(nearest), note: nearest ? nearest.streamName ?? 'Nearby stream' : 'None within 50 mi' }),
+    })
+  }
+  if (preferences.maintainedRoad) {
+    const first = maintained[0]
+    items.push({
+      key: 'road', label: 'Maintained road',
+      ...(loading ? pending : { met: Boolean(first), note: first ? first.name ?? ROAD_TYPE_LABELS[first.type] : 'None detected' }),
+    })
+  }
+  if (preferences.huntingAccess) {
+    items.push({
+      key: 'hunting', label: 'Hunting districts',
+      ...(loading ? pending : {
+        met: huntingSpecies.length > 0,
+        note: huntingSpecies.length > 0 ? huntingSpecies.map(capitalize).join(', ') : 'No districts overlap',
+      }),
+    })
+  }
+  if (preferences.electricGrid) {
+    const connected = Boolean(electric?.serviceTerritory || electric?.hasNearbyLine)
     items.push({
       key: 'electric', label: 'Electric grid',
-      met: loading ? null : gridConnected ?? false,
-      note: loading ? '' : elec?.serviceTerritory
-        ? elec.serviceTerritory.utilityName
-        : elec?.hasNearbyLine
-          ? elec.voltageClass ?? 'Transmission line nearby'
-          : 'No grid service found',
+      ...(loading ? pending : {
+        met: connected,
+        note: electric?.serviceTerritory?.utilityName
+          ?? (electric?.hasNearbyLine ? electric.voltageClass ?? 'Transmission line nearby' : 'No grid service found'),
+      }),
     })
   }
-  if (p.broadband) {
-    const providers = utilities?.broadband ?? []
-    // No source since the FCC retired its public lookup, so this cannot be judged met or unmet.
-    const dataAvailable = utilities?.broadbandDataAvailable ?? false
-    items.push({
-      key: 'broadband', label: 'Broadband',
-      met: loading || !dataAvailable ? null : providers.length > 0,
-      note: loading ? '' : !dataAvailable ? 'No data source' : providers.length > 0
-        ? providers[0]!.techType + (providers.length > 1 ? ` +${providers.length - 1}` : '')
-        : 'No providers reported',
-    })
-  }
-  if (p.lowFloodRisk) {
-    const isLow = !hasSFHA && (floodRiskLevel === 'minimal' || floodRiskLevel === null)
+  if (preferences.lowFloodRisk) {
     items.push({
       key: 'flood', label: 'Low flood risk',
-      met: loading ? null : isLow,
-      note: loading ? '' : hasSFHA ? 'SFHA — flood insurance required'
-        : floodRiskLevel ? floodRiskLevel.charAt(0).toUpperCase() + floodRiskLevel.slice(1) + ' risk'
-        : 'No flood zone overlay',
+      ...(loading ? pending : {
+        met: !hasSFHA && (floodRiskLevel === 'minimal' || floodRiskLevel === null),
+        note: hasSFHA ? 'SFHA, flood insurance required' : floodRiskLevel ? `${capitalize(floodRiskLevel)} risk` : 'No flood zone overlay',
+      }),
     })
   }
-  if (p.lowWildfireRisk) {
-    const isLow = wildfireRisk === 'Low' || wildfireRisk === 'Very Low'
+  if (preferences.lowWildfireRisk) {
     items.push({
       key: 'wildfire', label: 'Low wildfire risk',
-      met: loading ? null : wildfireRisk !== null ? isLow : null,
-      note: loading ? '' : wildfireRisk ?? 'No rating available',
+      ...(loading || wildfireRisk === null
+        ? { met: null, note: loading ? '' : 'No rating available' }
+        : { met: wildfireRisk === 'Low' || wildfireRisk === 'Very Low', note: wildfireRisk }),
     })
   }
-  if (p.noMineSites) items.push({
-    key: 'mines', label: 'No mine sites',
-    met: loading ? null : mineSiteCount === 0,
-    note: loading ? '' : mineSiteCount === 0
-      ? 'None within 10 mi'
-      : `${mineSiteCount} site${mineSiteCount > 1 ? 's' : ''} nearby`,
-  })
+  if (preferences.noMineSites) {
+    items.push({
+      key: 'mines', label: 'No mine sites',
+      ...(loading ? pending : {
+        met: mineSiteCount === 0,
+        note: mineSiteCount === 0 ? 'None within 10 mi' : `${mineSiteCount} site${mineSiteCount > 1 ? 's' : ''} nearby`,
+      }),
+    })
+  }
 
-  const scoredItems = items.filter((item) => item.met !== null)
-  const metCount = scoredItems.filter((item) => item.met).length
-  const total = scoredItems.length
-  const pct = total > 0 ? metCount / total : 0
-  const ratingLabel = pct === 1 ? 'Strong match' : pct >= 0.67 ? 'Good match' : pct >= 0.34 ? 'Partial match' : 'Low match'
-  const ratingClass = pct === 1 ? 'rating-excellent' : pct >= 0.67 ? 'rating-good' : pct >= 0.34 ? 'rating-partial' : 'rating-poor'
+  const scored = items.filter((item) => item.met !== null)
+  const metCount = scored.filter((item) => item.met).length
+  const rating = ratingLabel(scored.length > 0 ? metCount / scored.length : 0)
 
   return (
     <div className="rating-card">
       <div className="rating-card-head">
-        <span className="rating-card-title">Match Score</span>
-        {!loading && total > 0 && (
-          <span className={`rating-badge ${ratingClass}`}>
-            {metCount}/{total}&ensp;{ratingLabel}
-          </span>
+        <span className="rating-card-title">Match score</span>
+        {loading ? (
+          <span className="rating-badge-loading">Scoring…</span>
+        ) : scored.length > 0 && (
+          <span className={`rating-badge ${rating.className}`}>{metCount}/{scored.length}&ensp;{rating.label}</span>
         )}
-        {loading && <span className="rating-badge-loading">Scoring…</span>}
       </div>
-
-      {!loading && total > 0 && (
+      {!loading && scored.length > 0 && (
         <div className="rating-bar-wrap">
           <div className="rating-bar-track">
-            <div className={`rating-bar-fill ${ratingClass}`} style={{ width: `${(metCount / total) * 100}%` }} />
+            <div className={`rating-bar-fill ${rating.className}`} style={{ width: `${(metCount / scored.length) * 100}%` }} />
           </div>
         </div>
       )}
-
       <div className="rating-items">
         {items.map((item) => (
           <div key={item.key} className="rating-item">
@@ -587,132 +456,61 @@ function ParcelRating({
   )
 }
 
-function ListingCard({ listing, acreage }: { listing: Listing; acreage: number | null }) {
-  const hasImage = listing.images.length > 0
-  return (
-    <Card className="listing-card">
-      {hasImage && (
-        <img
-          src={listing.images[0]}
-          alt="Listing photo"
-          className="listing-card-image"
-        />
-      )}
-      <CardContent className="listing-card-content">
-        <div className="listing-card-head">
-          <span className="listing-price">{formatPrice(listing.price)}</span>
-          {listing.price && acreage && (
-            <span className="listing-price-per-acre">{formatPricePerAcre(listing.price, acreage)}</span>
-          )}
-          <Badge variant="subtle" className="listing-source-badge">
-            {getListingSourceLabel(listing.source)}
-          </Badge>
-        </div>
-        {listing.description && (
-          <Typography variant="body-sm" className="listing-description">
-            {listing.description.length > 280
-              ? listing.description.slice(0, 280) + '…'
-              : listing.description}
-          </Typography>
-        )}
-        <div className="listing-card-footer">
-          {listing.listedAt && (
-            <span className="listing-date">Listed {formatDate(listing.listedAt)}</span>
-          )}
-          <a
-            href={listing.listingUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="listing-link"
-          >
-            View listing →
-          </a>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
+// Checks run on demand because each one is a web search plus a model call.
+function ListingStatusSection({ parcelId }: { parcelId: string }) {
+  const check = useMutation({
+    mutationFn: (refresh: boolean) => parcelApi.checkListingStatus(parcelId, refresh).then(unwrap),
+  })
+  const status: ListingStatus | null = check.data ?? null
 
-function ListingStatusSection({
-  status,
-  isPending,
-  isError,
-  onCheck,
-}: {
-  status: ListingStatus | null
-  isPending: boolean
-  isError: boolean
-  onCheck: () => void
-}) {
-  if (!status && !isPending && !isError) {
+  if (check.isPending) {
     return (
       <div className="listing-status-prompt">
-        <Typography variant="body-sm" className="listing-status-hint">
-          We'll search the web to see if this property is currently listed for sale.
-        </Typography>
-        <Button variant="primary" size="sm" onClick={onCheck}>
-          Check if for sale
-        </Button>
-      </div>
-    )
-  }
-
-  if (isPending) {
-    return (
-      <div className="listing-status-prompt">
-        <span className="spinner" />
+        <span className="spinner spinner-sm" />
         <Typography variant="body-sm" className="listing-status-hint">Searching the web…</Typography>
       </div>
     )
   }
-
-  if (isError || !status) {
+  if (!status) {
     return (
       <div className="listing-status-prompt">
         <Typography variant="body-sm" className="listing-status-hint">
-          Could not check listing status right now.
+          {check.isError ? 'Could not check listing status right now.' : "We'll search the web to see if this property is currently listed for sale."}
         </Typography>
-        <Button variant="ghost" size="sm" onClick={onCheck}>Try again</Button>
+        <Button variant={check.isError ? 'ghost' : 'primary'} size="sm" onClick={() => check.mutate(false)}>
+          {check.isError ? 'Try again' : 'Check if for sale'}
+        </Button>
       </div>
     )
   }
-
   return (
     <div className={`listing-status-result ${status.forSale ? 'listing-status-for-sale' : 'listing-status-not-found'}`}>
       <div className="listing-status-head">
-        <Badge
-          variant={status.forSale ? 'default' : 'subtle'}
-          className={status.forSale ? 'listing-status-badge-for-sale' : undefined}
-        >
+        <Badge variant={status.forSale ? 'default' : 'subtle'} className={status.forSale ? 'listing-status-badge-for-sale' : undefined}>
           {status.forSale ? 'For sale' : 'Not found for sale'}
         </Badge>
-        {status.forSale && status.price != null && (
-          <span className="listing-price">{formatPrice(status.price)}</span>
-        )}
+        {status.forSale && status.price !== null && <span className="listing-price">{formatPrice(status.price)}</span>}
       </div>
       <Typography variant="body-sm" className="listing-status-summary">{status.summary}</Typography>
       <div className="listing-status-footer">
         {status.forSale && status.listingUrl && (
           <a href={status.listingUrl} target="_blank" rel="noopener noreferrer" className="listing-link">
-            {status.source ? `View on ${status.source} →` : 'View listing →'}
+            {status.source ? `View on ${status.source}` : 'View listing'}
           </a>
         )}
         <span className="listing-status-checked">Checked {formatDate(status.fetchedAt)}</span>
-        <Button variant="ghost" size="sm" onClick={onCheck}>Refresh</Button>
+        <Button variant="ghost" size="sm" onClick={() => check.mutate(true)}>Refresh</Button>
       </div>
     </div>
   )
 }
 
 function WaterRightCard({ waterRight }: { waterRight: WaterRight }) {
-  const statusClass = `wr-status-${waterRight.status}`
   return (
     <Card className="wr-card">
       <div className="wr-card-head">
         <code className="wr-number">{waterRight.waterRightNumber ?? 'Unknown'}</code>
-        <Badge variant="subtle" className={statusClass}>
-          {waterRight.status}
-        </Badge>
+        <Badge variant="subtle" className={`wr-status-${waterRight.status}`}>{waterRight.status}</Badge>
       </div>
       <div className="wr-body">
         <div className="wr-field">
@@ -723,21 +521,21 @@ function WaterRightCard({ waterRight }: { waterRight: WaterRight }) {
           <div className="wr-field-label">Type</div>
           <div className="wr-field-value">{formatWaterType(waterRight.waterType)}</div>
         </div>
-        {waterRight.flowRate != null && (
+        {waterRight.flowRateGpm !== null && (
           <div className="wr-field">
-            <div className="wr-field-label">Flow Rate</div>
-            <div className="wr-field-value">{formatFlowRate(waterRight.flowRate)}</div>
+            <div className="wr-field-label">Flow rate</div>
+            <div className="wr-field-value">{formatFlowRate(waterRight.flowRateGpm)}</div>
           </div>
         )}
-        {waterRight.volume != null && (
+        {waterRight.volumeAcreFeet !== null && (
           <div className="wr-field">
             <div className="wr-field-label">Volume</div>
-            <div className="wr-field-value">{formatVolume(waterRight.volume)}</div>
+            <div className="wr-field-value">{formatVolume(waterRight.volumeAcreFeet)}</div>
           </div>
         )}
         {waterRight.priorityDate && (
           <div className="wr-field" style={{ gridColumn: '1 / -1' }}>
-            <div className="wr-field-label">Priority Date</div>
+            <div className="wr-field-label">Priority date</div>
             <div className="wr-field-value wr-priority">{formatDate(waterRight.priorityDate)}</div>
           </div>
         )}
@@ -747,26 +545,18 @@ function WaterRightCard({ waterRight }: { waterRight: WaterRight }) {
 }
 
 function InsightCard({ insight }: { insight: ParcelInsight }) {
-  const sentences = insight.content
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean)
-
+  const sentences = insight.content.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean)
   return (
     <div className="insight-callout">
       <div className="insight-sentences">
-        {sentences.map((sentence, index) => (
-          <p key={index} className="insight-sentence">{sentence}</p>
-        ))}
+        {sentences.map((sentence, index) => <p key={index} className="insight-sentence">{sentence}</p>)}
       </div>
       <div className="insight-meta">Generated {formatDate(insight.createdAt)}</div>
     </div>
   )
 }
 
-function LoadingStatus({
-  parcelLoading, waterLoading, habitatLoading, accessLoading, envLoading, insightsLoading,
-}: {
+function LoadingStatus(flags: {
   parcelLoading: boolean
   waterLoading: boolean
   habitatLoading: boolean
@@ -774,14 +564,14 @@ function LoadingStatus({
   envLoading: boolean
   insightsLoading: boolean
 }) {
-  let label: string | null = null
-  if (parcelLoading) label = 'Loading parcel details…'
-  else if (waterLoading) label = 'Fetching water rights from DNRC…'
-  else if (habitatLoading) label = 'Loading habitat data…'
-  else if (accessLoading) label = 'Checking road & utility access…'
-  else if (envLoading) label = 'Checking environmental risks…'
-  else if (insightsLoading) label = 'Generating buildability summary…'
-
+  const label =
+    flags.parcelLoading ? 'Loading parcel details…'
+    : flags.waterLoading ? 'Fetching water rights from DNRC…'
+    : flags.habitatLoading ? 'Loading habitat data…'
+    : flags.accessLoading ? 'Checking road and utility access…'
+    : flags.envLoading ? 'Checking environmental risks…'
+    : flags.insightsLoading ? 'Generating buildability summary…'
+    : null
   if (!label) return null
   return (
     <div className="detail-loading-status">
@@ -795,27 +585,22 @@ function LoadingSkeleton({ rows }: { rows: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {Array.from({ length: rows }).map((_, i) => (
-        <div
-          key={i}
-          className="skeleton"
-          style={{ height: 18, borderRadius: 4, width: `${70 + (i % 3) * 10}%` }}
-        />
+        <div key={i} className="skeleton" style={{ height: 18, borderRadius: 4, width: `${70 + (i % 3) * 10}%` }} />
       ))}
     </div>
   )
 }
 
 function HuntingDistrictsSection({ districts }: { districts: HuntingDistrict[] }) {
-  const bySpecies: Record<string, string[]> = {}
-  for (const d of districts) {
-    if (!bySpecies[d.species]) bySpecies[d.species] = []
-    bySpecies[d.species]!.push(d.districtNumber)
+  const bySpecies = new Map<string, string[]>()
+  for (const district of districts) {
+    bySpecies.set(district.species, [...(bySpecies.get(district.species) ?? []), district.districtNumber])
   }
   return (
     <>
-      {Object.entries(bySpecies).map(([species, numbers]) => (
+      {[...bySpecies].map(([species, numbers]) => (
         <div key={species} className="detail-row">
-          <span className="detail-row-label" style={{ textTransform: 'capitalize' }}>{species}</span>
+          <span className="detail-row-label" style={{ textTransform: 'capitalize' }}>{species.replace(/_/g, ' ')}</span>
           <span className="detail-row-value">District {numbers.join(', ')}</span>
         </div>
       ))}
@@ -823,46 +608,37 @@ function HuntingDistrictsSection({ districts }: { districts: HuntingDistrict[] }
   )
 }
 
-const MONTH_LABELS = ['J','F','M','A','M','J','J','A','S','O','N','D']
+const MONTH_LABELS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
 
 function StreamGaugeCard({ gauge }: { gauge: StreamGauge }) {
-  // monthlyAveragesCfs is keyed by 1-based month number, not array index.
-  const monthlyFlows = Array.from({ length: 12 }, (_, monthIndex) => gauge.monthlyAveragesCfs[monthIndex + 1] ?? 0)
+  const monthlyFlows = MONTH_LABELS.map((_, index) => gauge.monthlyAveragesCfs[index + 1] ?? 0)
   const maxFlowCfs = Math.max(...monthlyFlows, 1)
   const hasMonthlyFlows = monthlyFlows.some((flowCfs) => flowCfs > 0)
-  const displayName = gauge.streamName ?? gauge.siteName
 
   return (
     <div className="gauge-card">
       <div className="gauge-card-head">
         <div className="gauge-card-name-wrap">
-          <div className="gauge-card-name">{displayName}</div>
-          {gauge.streamName && gauge.streamName !== gauge.siteName && (
-            <div className="gauge-card-site">{gauge.siteName}</div>
-          )}
+          <div className="gauge-card-name">{gauge.streamName ?? gauge.siteName}</div>
+          {gauge.streamName && <div className="gauge-card-site">{gauge.siteName}</div>}
         </div>
         <div className="gauge-card-distance">{gauge.distanceMiles} mi</div>
       </div>
-      {gauge.latestFlowCfs != null && (
+      {gauge.latestFlowCfs !== null && (
         <div className="gauge-latest">
           <span className="gauge-latest-label">Current</span>
           <span className="gauge-latest-value">{gauge.latestFlowCfs.toFixed(1)} cfs</span>
-          {gauge.latestReadingDate && (
-            <span className="gauge-latest-date">as of {formatDate(gauge.latestReadingDate)}</span>
-          )}
+          {gauge.latestReadingDate && <span className="gauge-latest-date">as of {formatDate(gauge.latestReadingDate)}</span>}
         </div>
       )}
       {hasMonthlyFlows && (
         <div className="gauge-bars">
-          {monthlyFlows.map((flowCfs, monthIndex) => (
-            <div key={monthIndex} className="gauge-bar-col">
+          {monthlyFlows.map((flowCfs, index) => (
+            <div key={index} className="gauge-bar-col">
               <div className="gauge-bar-track">
-                <div
-                  className="gauge-bar-fill"
-                  style={{ height: `${Math.round((flowCfs / maxFlowCfs) * 100)}%` }}
-                />
+                <div className="gauge-bar-fill" style={{ height: `${Math.round((flowCfs / maxFlowCfs) * 100)}%` }} />
               </div>
-              <div className="gauge-bar-label">{MONTH_LABELS[monthIndex]}</div>
+              <div className="gauge-bar-label">{MONTH_LABELS[index]}</div>
             </div>
           ))}
         </div>
@@ -871,317 +647,186 @@ function StreamGaugeCard({ gauge }: { gauge: StreamGauge }) {
   )
 }
 
-const ROAD_TYPE_LABELS: Record<string, string> = {
+const ROAD_TYPE_LABELS: Record<RoadSegment['type'], string> = {
   highway: 'Highway',
-  county:  'County Road',
-  local:   'Local Road',
-  trail:   '4WD Trail',
-  forest:  'Forest Road',
-  blm:     'BLM Road',
+  county: 'County road',
+  local: 'Local road',
+  trail: '4WD trail',
+  forest: 'Forest road',
+  blm: 'BLM road',
   unknown: 'Road',
 }
 
-const SOURCE_LABELS: Record<string, string> = {
+const SOURCE_LABELS: Record<RoadSegment['source'], string> = {
   tiger: 'TIGER/Census',
-  blm:   'BLM',
-  usfs:  'USFS',
+  blm: 'BLM',
+  usfs: 'USFS',
 }
 
 function roadTypeClass(type: RoadSegment['type']): string {
   if (type === 'highway' || type === 'county') return 'road-type-primary'
-  if (type === 'local' || type === 'forest' || type === 'blm') return 'road-type-secondary'
+  if (isPublicRoad(type)) return 'road-type-secondary'
   return 'road-type-rough'
 }
 
-const PUBLIC_ROAD_TYPES = new Set(['highway', 'county', 'local', 'forest', 'blm'])
-
-function RoadAccessSection({ access }: { access: RoadAccess }) {
-  const publicRoads = access.segments.filter((segment) => PUBLIC_ROAD_TYPES.has(segment.type))
-  const roughRoads = access.segments.filter((segment) => segment.type === "trail")
-
+function RoadItem({ segment }: { segment: RoadSegment }) {
   return (
-    <div>
-      {access.hasPublicAccess ? (
-        <div className="road-access-banner road-access-ok">
-          <span className="road-access-icon">✓</span>
-          Public road access detected
-        </div>
-      ) : (
-        <div className="road-access-banner road-access-warn">
-          <span className="road-access-icon">!</span>
-          No public road detected — verify legal access before purchase
-        </div>
-      )}
-
-      {publicRoads.length > 0 && (
-        <div className="road-list">
-          {publicRoads.map((seg, i) => (
-            <div key={i} className="road-item">
-              <div className="road-item-left">
-                <span className={`road-type-pill ${roadTypeClass(seg.type)}`}>
-                  {ROAD_TYPE_LABELS[seg.type] ?? seg.type}
-                </span>
-                <span className="road-item-name">{seg.name ?? 'Unnamed'}</span>
-              </div>
-              <div className="road-item-right">
-                {seg.surfaceType && (
-                  <span className="road-surface">{seg.surfaceType}</span>
-                )}
-                {seg.maintLevel != null && (
-                  <span className="road-maint">maint {seg.maintLevel}</span>
-                )}
-                <span className="road-source">{SOURCE_LABELS[seg.source] ?? seg.source}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {roughRoads.length > 0 && (
-        <div className="road-list road-list-rough">
-          <div className="road-list-subhead">Rough / High-Clearance Only</div>
-          {roughRoads.map((seg, i) => (
-            <div key={i} className="road-item">
-              <div className="road-item-left">
-                <span className={`road-type-pill ${roadTypeClass(seg.type)}`}>
-                  {ROAD_TYPE_LABELS[seg.type] ?? seg.type}
-                </span>
-                <span className="road-item-name">{seg.name ?? 'Unnamed'}</span>
-              </div>
-              <div className="road-item-right">
-                {seg.surfaceType && <span className="road-surface">{seg.surfaceType}</span>}
-                <span className="road-source">{SOURCE_LABELS[seg.source] ?? seg.source}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {access.segments.length === 0 && (
-        <div className="detail-empty-note" style={{ marginTop: 8 }}>
-          No roads found within 150 m of this parcel
-        </div>
-      )}
-
-      <div className="road-access-note">
-        Easements and private access rights require a title search — not reflected above.
+    <div className="road-item">
+      <div className="road-item-left">
+        <span className={`road-type-pill ${roadTypeClass(segment.type)}`}>{ROAD_TYPE_LABELS[segment.type]}</span>
+        <span className="road-item-name">{segment.name ?? 'Unnamed'}</span>
+      </div>
+      <div className="road-item-right">
+        {segment.surfaceType && <span className="road-surface">{segment.surfaceType}</span>}
+        {segment.maintLevel !== null && <span className="road-maint">maint {segment.maintLevel}</span>}
+        <span className="road-source">{SOURCE_LABELS[segment.source]}</span>
       </div>
     </div>
   )
 }
 
-const TECH_TYPE_ORDER = ['Fiber', 'Cable', 'Fixed Wireless', 'DSL', 'Satellite', 'Other']
+function RoadAccessSection({ access }: { access: RoadAccess }) {
+  const publicRoads = access.segments.filter((segment) => isPublicRoad(segment.type))
+  const roughRoads = access.segments.filter((segment) => segment.type === 'trail')
 
-function techTypeClass(tech: string): string {
-  if (tech === 'Fiber') return 'broadband-fiber'
-  if (tech === 'Cable') return 'broadband-cable'
-  if (tech === 'Fixed Wireless') return 'broadband-wireless'
-  if (tech === 'DSL') return 'broadband-dsl'
-  if (tech === 'Satellite') return 'broadband-satellite'
-  return 'broadband-other'
+  return (
+    <div>
+      {access.hasPublicAccess
+        ? <Banner tone="ok">Public road access detected</Banner>
+        : <Banner tone="warn">No public road detected. Verify legal access before purchase.</Banner>}
+      {publicRoads.length > 0 && (
+        <div className="road-list">
+          {publicRoads.map((segment, i) => <RoadItem key={i} segment={segment} />)}
+        </div>
+      )}
+      {roughRoads.length > 0 && (
+        <div className="road-list road-list-rough">
+          <div className="road-list-subhead">Rough or high-clearance only</div>
+          {roughRoads.map((segment, i) => <RoadItem key={i} segment={segment} />)}
+        </div>
+      )}
+      {access.segments.length === 0 && (
+        <div className="detail-empty-note" style={{ marginTop: 8 }}>No roads found within 150 m of this parcel</div>
+      )}
+      <div className="road-access-note">
+        Easements and private access rights require a title search and are not reflected above.
+      </div>
+    </div>
+  )
 }
 
 function UtilityAccessSection({ access }: { access: UtilityAccess }) {
-  const { electric, broadband } = access
-
-  const sortedBroadband = [...broadband].sort(
-    (a, b) =>
-      TECH_TYPE_ORDER.indexOf(a.techType) - TECH_TYPE_ORDER.indexOf(b.techType) ||
-      (b.maxDownloadSpeed ?? 0) - (a.maxDownloadSpeed ?? 0)
-  )
-
+  const { electric } = access
   return (
     <div>
-      {/* Electric grid */}
-      <div className="utility-subsection">
-        <div className="utility-subsection-label">Electric Grid</div>
-        {electric == null ? (
-          <div className="detail-empty-note">Electric data unavailable</div>
-        ) : (
-          <>
-            {electric.serviceTerritory && (
-              <>
-                <div className="road-access-banner road-access-ok">
-                  <span className="road-access-icon">✓</span>
-                  Within utility service territory
-                </div>
-                <div className="road-list">
-                  <div className="road-item">
-                    <div className="road-item-left">
-                      {electric.serviceTerritory.utilityType && (
-                        <span className="road-type-pill road-type-primary">{electric.serviceTerritory.utilityType}</span>
-                      )}
-                      <span className="road-item-name">{electric.serviceTerritory.utilityName}</span>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-            {electric.hasNearbyLine && (
-              <>
-                <div className={`road-access-banner road-access-ok${electric.serviceTerritory ? ' utility-secondary-banner' : ''}`}>
-                  <span className="road-access-icon">✓</span>
-                  Transmission line within 10 miles
-                </div>
-                <div className="road-list">
-                  <div className="road-item">
-                    <div className="road-item-left">
-                      {electric.voltageClass && (
-                        <span className="road-type-pill road-type-primary">{electric.voltageClass}</span>
-                      )}
-                      <span className="road-item-name">{electric.type ?? 'Transmission'}</span>
-                    </div>
-                    {electric.owner && (
-                      <div className="road-item-right">
-                        <span className="road-source">{electric.owner}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-            {!electric.serviceTerritory && !electric.hasNearbyLine && (
-              <div className="road-access-banner road-access-warn">
-                <span className="road-access-icon">!</span>
-                No utility service territory or transmission lines found — off-grid power likely required
-              </div>
-            )}
-            <div className="road-access-note">
-              Service territory data from EIA via HIFLD; confirms utility coverage area but not active
-              service at the parcel. Contact the utility directly for a connection quote.
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Broadband */}
-      <div className="utility-subsection" style={{ marginTop: 14 }}>
-        <div className="utility-subsection-label">Broadband Availability</div>
-        {!access.broadbandDataAvailable ? (
-          <div className="road-access-banner road-access-warn">
-            <span className="road-access-icon">!</span>
-            Broadband availability is unavailable — the FCC retired the public lookup this used
-          </div>
-        ) : sortedBroadband.length === 0 ? (
-          <div className="road-access-banner road-access-warn">
-            <span className="road-access-icon">!</span>
-            No broadband providers reported at this location
-          </div>
-        ) : (
+      {electric.serviceTerritory && (
+        <>
+          <Banner tone="ok">Within utility service territory</Banner>
           <div className="road-list">
-            {sortedBroadband.map((provider, index) => (
-              <BroadbandProviderRow key={index} provider={provider} />
-            ))}
+            <div className="road-item">
+              <div className="road-item-left">
+                {electric.serviceTerritory.utilityType && (
+                  <span className="road-type-pill road-type-primary">{electric.serviceTerritory.utilityType}</span>
+                )}
+                <span className="road-item-name">{electric.serviceTerritory.utilityName}</span>
+              </div>
+            </div>
           </div>
-        )}
-        {access.broadbandDataAvailable && (
-          <div className="road-access-note">
-            FCC broadband data reflects provider filings and may not match actual service at this address.
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function BroadbandProviderRow({ provider }: { provider: BroadbandProvider }) {
-  const dl = provider.maxDownloadSpeed
-  const ul = provider.maxUploadSpeed
-  const speedLabel = dl != null
-    ? `${dl >= 1000 ? `${dl / 1000} Gbps` : `${dl} Mbps`} ↓${ul != null ? ` / ${ul >= 1000 ? `${ul / 1000} Gbps` : `${ul} Mbps`} ↑` : ''}`
-    : null
-
-  return (
-    <div className="road-item">
-      <div className="road-item-left">
-        <span className={`road-type-pill ${techTypeClass(provider.techType)}`}>
-          {provider.techType}
-        </span>
-        <span className="road-item-name">{provider.providerName}</span>
-      </div>
-      {speedLabel && (
-        <div className="road-item-right">
-          <span className="road-source">{speedLabel}</span>
-        </div>
+        </>
       )}
+      {electric.hasNearbyLine && (
+        <>
+          <Banner tone="ok">Transmission line within 10 miles</Banner>
+          <div className="road-list">
+            <div className="road-item">
+              <div className="road-item-left">
+                {electric.voltageClass && <span className="road-type-pill road-type-primary">{electric.voltageClass}</span>}
+                <span className="road-item-name">{electric.lineType ?? 'Transmission'}</span>
+              </div>
+              {electric.owner && (
+                <div className="road-item-right"><span className="road-source">{electric.owner}</span></div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+      {!electric.serviceTerritory && !electric.hasNearbyLine && (
+        <Banner tone="warn">No utility service territory or transmission lines found. Off-grid power is likely required.</Banner>
+      )}
+      <div className="road-access-note">
+        Service territory data comes from EIA through HIFLD. It confirms a utility's coverage area,
+        not active service at the parcel. Contact the utility for a connection quote.
+      </div>
     </div>
   )
 }
 
-const FLOOD_RISK_LABELS: Record<string, string> = {
-  high: 'High Flood Risk',
-  moderate: 'Moderate Flood Risk',
-  minimal: 'Minimal Flood Risk',
-  undetermined: 'Undetermined Flood Zone',
+const FLOOD_RISK_LABELS: Record<FloodZone['riskLevel'], string> = {
+  high: 'High flood risk',
+  moderate: 'Moderate flood risk',
+  minimal: 'Minimal flood risk',
+  undetermined: 'Undetermined flood zone',
 }
 
-const FLOOD_RISK_CLASS: Record<string, string> = {
-  high: 'road-access-warn',
-  moderate: 'road-access-warn',
-  minimal: 'road-access-ok',
-  undetermined: '',
-}
-
-const FLOOD_RISK_ICON: Record<string, string> = {
-  high: '!',
-  moderate: '!',
-  minimal: '✓',
-  undetermined: '?',
+const FLOOD_RISK_TONE: Record<FloodZone['riskLevel'], 'ok' | 'warn' | 'neutral'> = {
+  high: 'warn',
+  moderate: 'warn',
+  minimal: 'ok',
+  undetermined: 'neutral',
 }
 
 const WILDFIRE_RISK_CLASS: Record<WildfireRiskRating, string> = {
-  'Very High': 'wr-status-unknown',
-  'High': 'wr-status-unknown',
-  'Medium': 'broadband-dsl',
-  'Low': 'broadband-fiber',
-  'Very Low': 'broadband-fiber',
+  'Very High': 'risk-pill-high',
+  'High': 'risk-pill-high',
+  'Medium': 'risk-pill-medium',
+  'Low': 'risk-pill-low',
+  'Very Low': 'risk-pill-low',
 }
 
 function FloodZoneRow({ zone }: { zone: FloodZone }) {
+  const pillClass = zone.riskLevel === 'high' ? 'road-type-rough' : zone.riskLevel === 'moderate' ? 'road-type-secondary' : 'road-type-primary'
   return (
     <div className="road-item">
       <div className="road-item-left">
-        <span className={`road-type-pill ${zone.riskLevel === 'high' ? 'road-type-rough' : zone.riskLevel === 'moderate' ? 'road-type-secondary' : 'road-type-primary'}`}>
-          Zone {zone.zone}
-        </span>
+        <span className={`road-type-pill ${pillClass}`}>Zone {zone.zone}</span>
         {zone.subtype && <span className="road-item-name">{zone.subtype}</span>}
       </div>
       <div className="road-item-right">
-        {zone.isSpecialFloodHazardArea && (
-          <span className="road-surface">SFHA</span>
-        )}
+        {zone.isSpecialFloodHazardArea && <span className="road-surface">SFHA</span>}
         <span className="road-source">{FLOOD_RISK_LABELS[zone.riskLevel]}</span>
       </div>
     </div>
   )
 }
 
+function MineSiteRow({ mine }: { mine: MineSite }) {
+  return (
+    <div className="road-item">
+      <div className="road-item-left">
+        <span className="road-type-pill road-type-rough">{mine.devStatus ?? 'Mine site'}</span>
+        <span className="road-item-name">{mine.name ?? 'Unnamed site'}</span>
+      </div>
+      {mine.commodities && <div className="road-item-right"><span className="road-source">{mine.commodities}</span></div>}
+    </div>
+  )
+}
+
 function EnvironmentalRiskSection({ risk }: { risk: EnvironmentalRisk }) {
   const { floodZones, wildfireRisk, mineSites } = risk
-
-  const worstFlood = floodZones[0] ?? null
+  const worstFlood = floodZones[0]
   const hasSFHA = floodZones.some((zone) => zone.isSpecialFloodHazardArea)
 
   return (
     <div>
-      {/* Flood Zone */}
       <div className="utility-subsection">
-        <div className="utility-subsection-label">Flood Zone</div>
-        {floodZones.length === 0 ? (
-          <div className="road-access-banner road-access-ok">
-            <span className="road-access-icon">✓</span>
-            No FEMA flood zone overlay at this parcel
-          </div>
+        <div className="utility-subsection-label">Flood zone</div>
+        {!worstFlood ? (
+          <Banner tone="ok">No FEMA flood zone overlay at this parcel</Banner>
         ) : (
           <>
-            {worstFlood && (
-              <div className={`road-access-banner ${FLOOD_RISK_CLASS[worstFlood.riskLevel] ?? ''}`}>
-                <span className="road-access-icon">{FLOOD_RISK_ICON[worstFlood.riskLevel]}</span>
-                {hasSFHA
-                  ? 'Special Flood Hazard Area — federal flood insurance may be required'
-                  : FLOOD_RISK_LABELS[worstFlood.riskLevel]}
-              </div>
-            )}
+            <Banner tone={FLOOD_RISK_TONE[worstFlood.riskLevel]}>
+              {hasSFHA ? 'Special Flood Hazard Area. Federal flood insurance may be required.' : FLOOD_RISK_LABELS[worstFlood.riskLevel]}
+            </Banner>
             <div className="road-list">
               {floodZones.map((zone, index) => <FloodZoneRow key={index} zone={zone} />)}
             </div>
@@ -1193,30 +838,24 @@ function EnvironmentalRiskSection({ risk }: { risk: EnvironmentalRisk }) {
         </div>
       </div>
 
-      {/* Wildfire Risk */}
       <div className="utility-subsection" style={{ marginTop: 14 }}>
-        <div className="utility-subsection-label">Wildfire Risk</div>
-        {wildfireRisk == null ? (
+        <div className="utility-subsection-label">Wildfire risk</div>
+        {wildfireRisk === null ? (
           <div className="detail-empty-note">No wildfire risk rating available for this area</div>
         ) : (
-          <div className="detail-row">
-            <span className="detail-row-label">FEMA NRI Rating</span>
-            <span className="detail-row-value">
-              <Badge variant="subtle" className={`road-type-pill ${WILDFIRE_RISK_CLASS[wildfireRisk]}`}>
-                {wildfireRisk}
-              </Badge>
-            </span>
-          </div>
+          <DetailRow
+            label="FEMA NRI rating"
+            value={<Badge variant="subtle" className={`road-type-pill ${WILDFIRE_RISK_CLASS[wildfireRisk]}`}>{wildfireRisk}</Badge>}
+          />
         )}
         <div className="road-access-note" style={{ marginTop: 6 }}>
-          Based on FEMA National Risk Index census-tract data. High-risk areas may affect insurance
+          Based on FEMA National Risk Index census tract data. High-risk areas may affect insurance
           availability and defensible-space requirements.
         </div>
       </div>
 
-      {/* Mine Sites */}
       <div className="utility-subsection" style={{ marginTop: 14 }}>
-        <div className="utility-subsection-label">Nearby Mine Sites</div>
+        <div className="utility-subsection-label">Nearby mine sites</div>
         {mineSites.length === 0 ? (
           <div className="detail-empty-note">No USGS-recorded mine sites within 10 miles</div>
         ) : (
@@ -1225,124 +864,62 @@ function EnvironmentalRiskSection({ risk }: { risk: EnvironmentalRisk }) {
           </div>
         )}
         <div className="road-access-note" style={{ marginTop: 6 }}>
-          USGS Mineral Resources Data System. Proximity to mines may indicate contamination risk —
-          consult Phase I/II environmental assessment before purchase.
+          USGS Mineral Resources Data System. Proximity to mines may indicate contamination risk.
+          Consult a Phase I or II environmental assessment before purchase.
         </div>
       </div>
     </div>
   )
 }
 
-function MineSiteRow({ mine }: { mine: MineSite }) {
-  const label = mine.devStatus ?? 'Mine Site'
-  return (
-    <div className="road-item">
-      <div className="road-item-left">
-        <span className="road-type-pill road-type-rough">{label}</span>
-        <span className="road-item-name">{mine.name ?? 'Unnamed Site'}</span>
-      </div>
-      {mine.commodities && (
-        <div className="road-item-right">
-          <span className="road-source">{mine.commodities}</span>
-        </div>
-      )}
-    </div>
-  )
+function monthlyPayment(principal: number, annualRatePercent: number, years: number): number {
+  const monthlyRate = annualRatePercent / 100 / 12
+  const payments = years * 12
+  if (principal <= 0 || monthlyRate <= 0 || payments <= 0) return 0
+  const growth = Math.pow(1 + monthlyRate, payments)
+  return (principal * monthlyRate * growth) / (growth - 1)
 }
 
-function LoanCalculator({ listingPrice }: { listingPrice: number | null }) {
-  const [purchasePrice, setPurchasePrice] = useState<string>(
-    listingPrice != null ? String(Math.round(listingPrice)) : ''
-  )
-  const [downPct, setDownPct] = useState('20')
+function LoanCalculator() {
+  const [purchasePrice, setPurchasePrice] = useState('')
+  const [downPercent, setDownPercent] = useState('20')
   const [rate, setRate] = useState('8.5')
   const [termYears, setTermYears] = useState('15')
 
-  useEffect(() => {
-    if (listingPrice != null && purchasePrice === '') {
-      setPurchasePrice(String(Math.round(listingPrice)))
-    }
-  }, [listingPrice])
+  const price = Number.parseFloat(purchasePrice) || 0
+  const down = Math.min(Math.max(Number.parseFloat(downPercent) || 0, 0), 100)
+  const monthly = monthlyPayment(price * (1 - down / 100), Number.parseFloat(rate) || 0, Number.parseInt(termYears, 10) || 0)
 
-  const price = parseFloat(purchasePrice) || 0
-  const down = Math.min(Math.max(parseFloat(downPct) || 0, 0), 100)
-  const annualRate = parseFloat(rate) || 0
-  const years = parseInt(termYears) || 0
-  const loanAmount = price * (1 - down / 100)
-  const monthlyRate = annualRate / 100 / 12
-  const n = years * 12
-  const monthly =
-    loanAmount > 0 && monthlyRate > 0 && n > 0
-      ? loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, n)) / (Math.pow(1 + monthlyRate, n) - 1)
-      : 0
+  const numberInput = (value: string, onChange: (value: string) => void, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <input type="number" className="loan-input loan-input-sm" value={value} onChange={(event) => onChange(event.target.value)} {...extra} />
+  )
 
   return (
     <div>
-      <div className="detail-row">
-        <span className="detail-row-label">Purchase price</span>
-        <span className="detail-row-value">
-          <input
-            type="number"
-            className="loan-input"
-            value={purchasePrice}
-            min={0}
-            placeholder="Enter price"
-            onChange={(changeEvent) => setPurchasePrice(changeEvent.target.value)}
-          />
-        </span>
-      </div>
-      <div className="detail-row">
-        <span className="detail-row-label">Down payment</span>
-        <span className="detail-row-value">
-          <input
-            type="number"
-            className="loan-input loan-input-sm"
-            value={downPct}
-            min={0} max={100}
-            onChange={(changeEvent) => setDownPct(changeEvent.target.value)}
-          />
-          <span className="loan-input-suffix">%</span>
-          {price > 0 && (
-            <span className="loan-input-computed">
-              {' '}= ${Math.round(price * (parseFloat(downPct) || 0) / 100).toLocaleString()}
-            </span>
-          )}
-        </span>
-      </div>
-      <div className="detail-row">
-        <span className="detail-row-label">Interest rate</span>
-        <span className="detail-row-value">
-          <input
-            type="number"
-            className="loan-input loan-input-sm"
-            value={rate}
-            min={0} max={30} step={0.1}
-            onChange={(changeEvent) => setRate(changeEvent.target.value)}
-          />
-          <span className="loan-input-suffix">% / yr</span>
-        </span>
-      </div>
-      <div className="detail-row">
-        <span className="detail-row-label">Loan term</span>
-        <span className="detail-row-value">
-          <input
-            type="number"
-            className="loan-input loan-input-sm"
-            value={termYears}
-            min={1} max={30}
-            onChange={(changeEvent) => setTermYears(changeEvent.target.value)}
-          />
-          <span className="loan-input-suffix">years</span>
-        </span>
-      </div>
+      <DetailRow
+        label="Purchase price"
+        value={<input type="number" className="loan-input" value={purchasePrice} min={0} placeholder="Enter price" onChange={(event) => setPurchasePrice(event.target.value)} />}
+      />
+      <DetailRow
+        label="Down payment"
+        value={
+          <>
+            {numberInput(downPercent, setDownPercent, { min: 0, max: 100 })}
+            <span className="loan-input-suffix">%</span>
+            {price > 0 && <span className="loan-input-computed"> = {formatPrice(Math.round((price * down) / 100))}</span>}
+          </>
+        }
+      />
+      <DetailRow label="Interest rate" value={<>{numberInput(rate, setRate, { min: 0, max: 30, step: 0.1 })}<span className="loan-input-suffix">% / yr</span></>} />
+      <DetailRow label="Loan term" value={<>{numberInput(termYears, setTermYears, { min: 1, max: 30 })}<span className="loan-input-suffix">years</span></>} />
       {monthly > 0 && (
         <div className="loan-result">
           <span className="loan-result-label">Est. monthly P&amp;I</span>
-          <span className="loan-result-amount">${Math.round(monthly).toLocaleString()}/mo</span>
+          <span className="loan-result-amount">{formatPrice(Math.round(monthly))}/mo</span>
         </div>
       )}
       <div className="loan-note">
-        Land loans typically carry higher rates (7–11%) and shorter terms than residential
+        Land loans typically carry higher rates (7 to 11%) and shorter terms than residential
         mortgages. Consult a lender for an accurate quote.
       </div>
     </div>
@@ -1352,10 +929,9 @@ function LoanCalculator({ listingPrice }: { listingPrice: number | null }) {
 function ConservationEasementSection({ easements }: { easements: ConservationEasement[] }) {
   return (
     <div>
-      <div className="road-access-banner road-access-warn">
-        <span className="road-access-icon">!</span>
-        {easements.length} conservation easement{easements.length > 1 ? 's' : ''} found — development restrictions may apply
-      </div>
+      <Banner tone="warn">
+        {easements.length} conservation easement{easements.length > 1 ? 's' : ''} found. Development restrictions may apply.
+      </Banner>
       <div className="road-list">
         {easements.map((easement, index) => (
           <div key={index} className="easement-card">
@@ -1363,7 +939,7 @@ function ConservationEasementSection({ easements }: { easements: ConservationEas
             {easement.purpose && <div className="easement-field"><span className="easement-field-label">Purpose</span> {easement.purpose}</div>}
             {easement.restrictions && <div className="easement-field"><span className="easement-field-label">Restrictions</span> {easement.restrictions}</div>}
             <div className="easement-meta">
-              {easement.acreage != null && <span>{easement.acreage.toLocaleString()} ac</span>}
+              {easement.acreage !== null && <span>{easement.acreage.toLocaleString()} ac</span>}
               {easement.dateRecorded && <span>Recorded {formatDate(easement.dateRecorded)}</span>}
             </div>
           </div>
@@ -1371,9 +947,8 @@ function ConservationEasementSection({ easements }: { easements: ConservationEas
       </div>
       <div className="road-access-note">
         Source: National Conservation Easement Database (NCED). Verify restrictions with a
-        real estate attorney — easement terms vary and affect building, subdivision, and use.
+        real estate attorney. Easement terms vary and affect building, subdivision, and use.
       </div>
     </div>
   )
 }
-

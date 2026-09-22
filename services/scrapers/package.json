@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "cadastral": "ts-node cadastral/index.ts",
     "water-rights": "ts-node water-rights/index.ts",
@@ -19,6 +18,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/pg": "^8.11.10",
+    "esbuild": "^0.25.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }

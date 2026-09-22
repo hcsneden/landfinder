@@ -1,51 +1,41 @@
-import https from 'https';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
+import type { Parcel, ParcelCandidate, ParcelCandidates } from '@lastbestland/shared';
+import { parsePriorityDate, parseWaterRightStatus, parseWaterType } from '@lastbestland/shared';
 import { query, execute } from '../shared/db';
-import { success, badRequest, serverError, error as errorResponse } from '../shared/response';
+import { env } from '../shared/env';
+import { fetchJson, isTimeoutError } from '../shared/http';
+import { queryArcGis, arcGisLiteral, pointGeometryParams, polygonGeometryParams, type ArcGisFeature } from '../shared/arcgis';
+import { parcelColumns, toParcel, type ParcelRow } from '../shared/parcels';
+import { success, badRequest, serverError, serviceUnavailable } from '../shared/response';
 import { getOrCheckListingStatus } from '../shared/listingStatus';
+import { invalidateCachedParcel } from '../shared/parcelCache';
 import { logger } from '../shared/logger';
-import type { Parcel, ParcelCandidate } from '@lastbestland/shared';
+import {
+  addressVariants,
+  cityPart,
+  hasNoHouseNumber,
+  lotNumberAsHouseNumber,
+  parseAddressParts,
+  parseStreetNumber,
+  roadName,
+  streetPart,
+} from './address';
 
-const CADASTRAL_URL =
-  'https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1/query';
-// Layer 6: Geocodes — exact parcel-geocode linkage
-const DNRC_WRQS_GEOCODE_URL =
-  'https://gis.dnrc.mt.gov/arcgis/rest/services/WRD/WRQS/FeatureServer/6/query';
-// Layer 2: Places of Use — geographic polygons of where water rights are applied
-const DNRC_WRQS_POU_URL =
-  'https://gis.dnrc.mt.gov/arcgis/rest/services/WRD/WRQS/FeatureServer/2/query';
-const CENSUS_GEOCODER_URL =
-  'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress';
-const CENSUS_GEOCODER_STRUCTURED_URL =
-  'https://geocoding.geo.census.gov/geocoder/locations/address';
-// Montana E911 address points — has house-number-level records with direct ParcelID links
-const MSDI_ADDRESS_URL =
-  'https://gisservice.mt.gov/arcgis/rest/services/msdi_structures_addresses_map_v1/MapServer/0/query';
-const TIMEOUT_MS = 25_000;
+// Montana State Library cadastral parcels and E911 address points.
+const CADASTRAL_URL = 'https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1/query';
+const ADDRESS_POINTS_URL = 'https://gisservice.mt.gov/arcgis/rest/services/msdi_structures_addresses_map_v1/MapServer/0/query';
+// DNRC Water Right Query System. Layer 6 links rights to parcel geocodes, layer 2 holds place-of-use polygons.
+const WRQS_GEOCODE_URL = 'https://gis.dnrc.mt.gov/arcgis/rest/services/WRD/WRQS/FeatureServer/6/query';
+const WRQS_PLACE_OF_USE_URL = 'https://gis.dnrc.mt.gov/arcgis/rest/services/WRD/WRQS/FeatureServer/2/query';
+const CENSUS_ONELINE_URL = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress';
+const CENSUS_STRUCTURED_URL = 'https://geocoding.geo.census.gov/geocoder/locations/address';
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 
-const WRQS_GEOCODE_FIELDS = 'WR_NUMBER,WR_STATUS,ENF_PRTY_DT_DATE,SOURCE_NAMES,SOURCE_TYPES,MAX_FLOW_GPM,MAX_VOL,GEOCD';
-const WRQS_POU_FIELDS = 'WR_NUMBER,WR_STATUS,ENF_PRTY_DT_DATE,ENF_PRTY_DT_CHAR,OWNERS,PURPOSE,MAX_FLOW_GPM,MAX_FLOW_CFS,MAX_VOL,GEOCODES,URL_ABSTRACT';
-
-// Montana state GIS servers use intermediate CAs not in the Node.js default bundle
-const gisAgent = new https.Agent({ rejectUnauthorized: false });
-
-function fetchGis(url: string): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { agent: gisAgent }, (res) => {
-      let raw = '';
-      res.on('data', (chunk: string) => { raw += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(raw)); }
-        catch (e) { reject(e); }
-      });
-    });
-    req.setTimeout(TIMEOUT_MS, () => {
-      req.destroy();
-      reject(new Error('GIS request timed out'));
-    });
-    req.on('error', reject);
-  });
-}
+const GIS_TIMEOUT_MS = 25_000;
+const CADASTRAL_FIELDS = 'PARCELID,CountyName,AddressLine1,CityStateZip,TotalAcres,GISAcres,TotalBuildingValue,PropType,Subdivision,TotalValue';
+const CANDIDATE_LIMIT = 50;
+// Each listing check is a web search plus a model call, so only the first few candidates are checked.
+const LISTING_CHECK_CANDIDATE_CAP = 10;
 
 interface CadastralAttributes {
   PARCELID: string;
@@ -60,285 +50,342 @@ interface CadastralAttributes {
   TotalValue: number | null;
 }
 
-interface CadastralFeature {
-  attributes: CadastralAttributes;
-  geometry?: { rings: number[][][] };
+type CadastralFeature = ArcGisFeature<CadastralAttributes>;
+
+interface LatLng {
+  lat: number;
+  lng: number;
 }
 
-function calculateCentroid(rings: number[][][]): { lat: number; lng: number } | null {
-  if (!rings || !rings[0] || rings[0].length === 0) return null;
-  const ring = rings[0];
-  let sumLng = 0;
-  let sumLat = 0;
-  for (const point of ring) {
-    sumLng += point[0] ?? 0;
-    sumLat += point[1] ?? 0;
-  }
-  return { lng: sumLng / ring.length, lat: sumLat / ring.length };
-}
-
-function extractStreetAddress(q: string): string {
-  const parts = q.split(',');
-  return (parts[0] ?? q).trim();
-}
-
-function sanitizeLike(s: string): string {
-  return s.replace(/'/g, "''").replace(/[;\\]/g, '').trim();
-}
-
-// USPS-style abbreviations that show up in listing addresses (both street-type
-// suffixes like Rd/Ln and name words like Mdws/Crk). Listing sites and the state
-// MSDI data disagree on which form they store — the cadastral abbreviates suffixes
-// ("PRONGHORN LN") while a listing may spell them out, and vice versa for name
-// words. So we search every form rather than betting on one.
-const FULL_TO_ABBREV: Record<string, string> = {
-  road: 'rd', street: 'st', avenue: 'ave', lane: 'ln', drive: 'dr',
-  boulevard: 'blvd', court: 'ct', place: 'pl', highway: 'hwy', circle: 'cir',
-  terrace: 'ter', parkway: 'pkwy', trail: 'trl', crossing: 'xing', junction: 'jct',
-  meadows: 'mdws', creek: 'crk', view: 'vw', springs: 'spgs', spring: 'spg',
-  heights: 'hts', valley: 'vly', ranch: 'rnch', village: 'vlg', lake: 'lk',
-  lakes: 'lks', point: 'pt', ridge: 'rdg', summit: 'smt', station: 'sta',
-  landing: 'lndg', estates: 'est', canyon: 'cyn', cove: 'cv', fork: 'frk',
-  forks: 'frks', glen: 'gln', hill: 'hl', hills: 'hls', hollow: 'holw',
-  knoll: 'knl', knolls: 'knls', mount: 'mt', mountain: 'mtn', plains: 'plns',
-  river: 'riv', shores: 'shrs', vista: 'vis',
-};
-const ABBREV_TO_FULL: Record<string, string> = Object.fromEntries(
-  Object.entries(FULL_TO_ABBREV).map(([full, abbr]) => [abbr, full])
-);
-
-// Replace whole alphabetic words per the map, leaving ordinals like "1st" intact
-// (the \b guards prevent matching the "st" inside "1st").
-function replaceWords(s: string, map: Record<string, string>): string {
-  return s.replace(/\b[A-Za-z]+\b/g, (w) => map[w.toLowerCase()] ?? w);
-}
-
-// Original plus its fully-expanded and fully-abbreviated forms (deduped).
-function addressVariants(s: string): string[] {
-  const variants = [s, replaceWords(s, ABBREV_TO_FULL), replaceWords(s, FULL_TO_ABBREV)]
-    .map((v) => v.trim())
-    .filter(Boolean);
-  return [...new Set(variants)];
-}
-
-// OR together a "<field> LIKE '%variant%'" clause for each abbreviation variant.
 function likeAnyVariant(field: string, value: string): string {
   return addressVariants(value)
-    .map((v) => `UPPER(${field}) LIKE UPPER('%${sanitizeLike(v)}%')`)
+    .map((variant) => `UPPER(${field}) LIKE UPPER('%${arcGisLiteral(variant)}%')`)
     .join(' OR ');
 }
 
-interface WrqsFeature {
-  attributes: Record<string, unknown>;
+function queryCadastral(params: Record<string, string>): Promise<CadastralFeature[]> {
+  return queryArcGis<CadastralAttributes>(
+    CADASTRAL_URL,
+    { outFields: CADASTRAL_FIELDS, returnGeometry: 'true', outSR: '4326', ...params },
+    GIS_TIMEOUT_MS
+  );
 }
 
-interface WrqsResponse {
-  features?: WrqsFeature[];
-  error?: { message: string };
+async function firstCadastral(params: Record<string, string>): Promise<CadastralFeature | null> {
+  const features = await queryCadastral({ ...params, resultRecordCount: '1' });
+  return features[0] ?? null;
 }
 
-async function queryWrqsGeocodes(parcelIdCode: string): Promise<WrqsFeature[]> {
-  const safe = parcelIdCode.replace(/'/g, "''");
-  const params = new URLSearchParams({
-    where: `GEOCD = '${safe}'`,
-    outFields: WRQS_GEOCODE_FIELDS,
-    resultRecordCount: '100',
-    f: 'json',
+function cadastralById(parcelId: string): Promise<CadastralFeature | null> {
+  return firstCadastral({ where: `PARCELID = '${arcGisLiteral(parcelId)}'` });
+}
+
+function cadastralByAddressOrId(q: string): Promise<CadastralFeature | null> {
+  return firstCadastral({
+    where: `(${likeAnyVariant('AddressLine1', streetPart(q))}) OR UPPER(PARCELID) LIKE UPPER('%${arcGisLiteral(q)}%')`,
   });
-
-  const data = await fetchGis(`${DNRC_WRQS_GEOCODE_URL}?${params}`) as WrqsResponse;
-  if (data.error) {
-    logger.warn('WRQS geocode query error', { message: data.error.message });
-    return [];
-  }
-  return data.features ?? [];
 }
 
-async function queryWrqsPlaceOfUse(
-  rings: number[][][] | null,
-  lat: number | null,
-  lng: number | null,
-): Promise<WrqsFeature[]> {
-  let geometryParam: string;
-  let geometryType: string;
+function cadastralByPoint(point: LatLng): Promise<CadastralFeature | null> {
+  return firstCadastral(pointGeometryParams(point.lat, point.lng));
+}
 
-  if (rings) {
-    geometryParam = JSON.stringify({ rings });
-    geometryType = 'esriGeometryPolygon';
-  } else if (lat != null && lng != null) {
-    geometryParam = JSON.stringify({ x: lng, y: lat });
-    geometryType = 'esriGeometryPoint';
-  } else {
-    return [];
-  }
-
-  const params = new URLSearchParams({
-    geometry: geometryParam,
-    geometryType,
-    spatialRel: 'esriSpatialRelIntersects',
-    inSR: '4326',
-    where: '1=1',
-    outFields: WRQS_POU_FIELDS,
-    resultRecordCount: '100',
-    f: 'json',
+function cadastralOnRoad(road: string): Promise<CadastralFeature[]> {
+  return queryCadastral({
+    where: likeAnyVariant('AddressLine1', road),
+    resultRecordCount: String(CANDIDATE_LIMIT),
+    orderByFields: 'TotalAcres DESC',
   });
-
-  // For point-only parcels use a small radius so we don't grab neighbors
-  if (geometryType === 'esriGeometryPoint') {
-    params.set('distance', '0.1');
-    params.set('units', 'esriSRUnit_StatuteMile');
-  }
-
-  const data = await fetchGis(`${DNRC_WRQS_POU_URL}?${params}`) as WrqsResponse;
-  if (data.error) {
-    logger.warn('WRQS place-of-use query error', { message: data.error.message });
-    return [];
-  }
-  return data.features ?? [];
 }
 
-function parseStatus(raw: unknown): 'active' | 'inactive' | 'pending' | 'unknown' {
-  const s = ((raw as string) ?? '').toUpperCase();
-  if (s.includes('ACTIVE') && !s.includes('IN')) return 'active';
-  if (s.includes('INACTIVE') || s.includes('TERMINATED') || s.includes('ABANDONED') || s.includes('REVOKED')) return 'inactive';
-  if (s.includes('PENDING') || s.includes('APPLICATION')) return 'pending';
-  return 'unknown';
+async function cadastralByAddressPoint(q: string): Promise<CadastralFeature | null> {
+  const parsed = parseStreetNumber(streetPart(q));
+  if (!parsed) return null;
+  const city = arcGisLiteral(cityPart(q));
+  const cityClause = city ? ` AND UPPER(Post_Comm) LIKE UPPER('%${city}%')` : '';
+  const features = await queryArcGis<{ ParcelID?: string | null }>(
+    ADDRESS_POINTS_URL,
+    {
+      where: `Add_Number = ${parsed.number} AND (${likeAnyVariant('St_Name', parsed.name)})${cityClause}`,
+      outFields: 'ParcelID',
+      resultRecordCount: '1',
+    },
+    GIS_TIMEOUT_MS
+  );
+  const parcelId = features[0]?.attributes.ParcelID;
+  return parcelId ? cadastralById(parcelId) : null;
 }
 
-function parsePriorityDate(epochMs: unknown, fallback: unknown): string | null {
-  if (typeof epochMs === 'number') return new Date(epochMs).toISOString().split('T')[0] ?? null;
-  if (typeof fallback === 'string' && fallback) {
-    const d = new Date(fallback);
-    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] ?? null;
+interface CensusGeocodeResponse {
+  result?: { addressMatches?: Array<{ coordinates?: { x: number; y: number } }> };
+}
+
+async function censusGeocode(url: string, params: Record<string, string>): Promise<LatLng | null> {
+  const search = new URLSearchParams({ ...params, benchmark: 'Public_AR_Current', format: 'json' });
+  const data = await fetchJson<CensusGeocodeResponse>(`${url}?${search}`, {}, GIS_TIMEOUT_MS);
+  const coords = data.result?.addressMatches?.[0]?.coordinates;
+  return coords ? { lat: coords.y, lng: coords.x } : null;
+}
+
+function censusOneline(q: string): Promise<LatLng | null> {
+  return censusGeocode(CENSUS_ONELINE_URL, { address: q });
+}
+
+function censusStructured(q: string): Promise<LatLng | null> {
+  const parts = parseAddressParts(q);
+  if (!parts) return Promise.resolve(null);
+  return censusGeocode(CENSUS_STRUCTURED_URL, {
+    street: parts.street,
+    city: parts.city,
+    state: parts.state,
+    ...(parts.zip ? { zip: parts.zip } : {}),
+  });
+}
+
+async function nominatim(q: string): Promise<LatLng | null> {
+  const search = new URLSearchParams({ q, format: 'json', limit: '1', countrycodes: 'us' });
+  const data = await fetchJson<Array<{ lat: string; lon: string }>>(
+    `${NOMINATIM_URL}?${search}`,
+    { headers: { 'User-Agent': `landfinder/1.0 (${env.geocoderContactEmail})` } },
+    10_000
+  );
+  const first = data[0];
+  return first ? { lat: Number.parseFloat(first.lat), lng: Number.parseFloat(first.lon) } : null;
+}
+
+// Most authoritative first. Each failure is logged and the next geocoder tried.
+const GEOCODERS: Array<[string, (q: string) => Promise<LatLng | null>]> = [
+  ['census', censusOneline],
+  ['census-structured', censusStructured],
+  ['nominatim', nominatim],
+];
+
+async function geocode(q: string): Promise<LatLng | null> {
+  for (const [name, geocoder] of GEOCODERS) {
+    try {
+      const point = await geocoder(q);
+      if (point) return point;
+    } catch (err) {
+      logger.warn('Geocoder failed', { geocoder: name, error: String(err) });
+    }
   }
   return null;
 }
 
-function parseWaterType(sourceTypes: unknown): 'surface' | 'groundwater' | 'mixed' {
-  const s = ((sourceTypes as string) ?? '').toUpperCase();
-  if (s.includes('SURFACE') && s.includes('GROUND')) return 'mixed';
-  if (s.includes('GROUND')) return 'groundwater';
-  return 'surface';
+type Resolution =
+  | { kind: 'parcel'; feature: CadastralFeature }
+  | { kind: 'candidates'; features: CadastralFeature[]; road: string }
+  | null;
+
+async function candidatesOnRoad(road: string): Promise<Resolution> {
+  const features = await cadastralOnRoad(road);
+  if (features.length > 1) return { kind: 'candidates', features, road };
+  if (features.length === 1) return { kind: 'parcel', feature: features[0]! };
+  return null;
 }
 
-interface MergedRight {
-  wrNumber: string;
-  waterSource: string | null;
-  waterType: 'surface' | 'groundwater' | 'mixed';
+/**
+ * Resolves a query to a parcel or a list of candidates by trying, in order:
+ * road-name search for addresses without a house number, cadastral match on
+ * address or parcel ID, the E911 address point layer, geocoding followed by a
+ * point-in-polygon query, and finally a road-name search as a fallback.
+ */
+async function resolve(q: string): Promise<Resolution> {
+  if (hasNoHouseNumber(q)) {
+    const road = roadName(q);
+    const resolution = road ? await candidatesOnRoad(road) : null;
+    if (resolution) return resolution;
+  }
+
+  let feature = await cadastralByAddressOrId(q);
+  feature ??= await cadastralByAddressPoint(q);
+  if (!feature) {
+    const point = await geocode(q);
+    if (point) feature = await cadastralByPoint(point);
+  }
+  if (feature) return { kind: 'parcel', feature };
+
+  const road = roadName(q);
+  return road ? candidatesOnRoad(road) : null;
+}
+
+function formatAddress(attributes: CadastralAttributes): string | null {
+  if (!attributes.AddressLine1) return null;
+  const city = attributes.CityStateZip?.trim();
+  return `${attributes.AddressLine1.trim()}${city ? `, ${city}` : ''}`;
+}
+
+function toCandidate(feature: CadastralFeature): ParcelCandidate {
+  const { attributes } = feature;
+  return {
+    parcelId: attributes.PARCELID,
+    address: formatAddress(attributes),
+    acreage: attributes.TotalAcres ?? attributes.GISAcres ?? null,
+    county: attributes.CountyName,
+    subdivision: attributes.Subdivision,
+    totalValue: attributes.TotalValue,
+    forSale: null,
+    listingSummary: null,
+  };
+}
+
+async function toCandidates(features: CadastralFeature[], road: string): Promise<ParcelCandidates> {
+  const candidates = features.map(toCandidate);
+  const checks = await Promise.all(
+    candidates.slice(0, LISTING_CHECK_CANDIDATE_CAP).map((candidate) =>
+      candidate.address ? getOrCheckListingStatus(candidate.parcelId, candidate.address) : null
+    )
+  );
+  const enriched = candidates.map((candidate, i) => {
+    const status = checks[i];
+    return status ? { ...candidate, forSale: status.forSale, listingSummary: status.summary } : candidate;
+  });
+  // Parcels that are for sale lead, without hiding how many matched.
+  return {
+    candidates: [...enriched.filter((c) => c.forSale), ...enriched.filter((c) => !c.forSale)],
+    roadName: road,
+  };
+}
+
+// The point is the centroid of the boundary when one is available. The upsert
+// keeps an existing point or boundary if the new record lacks one.
+async function upsertParcel(feature: CadastralFeature): Promise<ParcelRow> {
+  const { attributes, geometry } = feature;
+  const boundary = geometry?.rings ? JSON.stringify({ type: 'Polygon', coordinates: geometry.rings }) : null;
+  const rows = await query<ParcelRow>(
+    `INSERT INTO parcels (state, county, parcel_number, geo_id, address, acreage, building_value, prop_type, boundary, coordinates)
+     SELECT 'MT', $1, $2, $2, $3, $4, $5, $6, b.geom, ST_Centroid(b.geom::geometry)::geography
+     FROM (SELECT ST_GeomFromGeoJSON($7)::geography AS geom) b
+     ON CONFLICT (state, parcel_number) DO UPDATE SET
+       county = EXCLUDED.county,
+       address = EXCLUDED.address,
+       acreage = EXCLUDED.acreage,
+       building_value = EXCLUDED.building_value,
+       prop_type = EXCLUDED.prop_type,
+       coordinates = COALESCE(EXCLUDED.coordinates, parcels.coordinates),
+       boundary = COALESCE(EXCLUDED.boundary, parcels.boundary),
+       updated_at = NOW()
+     RETURNING ${parcelColumns()}`,
+    [
+      attributes.CountyName || null,
+      attributes.PARCELID,
+      formatAddress(attributes),
+      attributes.TotalAcres ?? attributes.GISAcres ?? null,
+      attributes.TotalBuildingValue ?? null,
+      attributes.PropType ?? null,
+      boundary,
+    ]
+  );
+  if (!rows[0]) throw new Error('No row returned from parcel upsert');
+  // The upsert just replaced the cadastral fields, so the cached copy is stale.
+  // Dropped rather than rewritten: the next read repopulates from Postgres, and
+  // a failed delete only costs a stale read for the rest of the record's TTL.
+  await invalidateCachedParcel(rows[0].id);
+  return rows[0];
+}
+
+interface WaterRightRecord {
+  number: string;
+  source: string | null;
+  type: string;
   flowRateGpm: number | null;
   volume: number | null;
   priorityDate: string | null;
-  status: 'active' | 'inactive' | 'pending' | 'unknown';
+  status: string;
   rawData: Record<string, unknown>;
 }
 
-function fromGeocodeFeature(attr: Record<string, unknown>): MergedRight {
+type WrqsFeature = ArcGisFeature<Record<string, unknown>>;
+
+function fromGeocodeLayer(attributes: Record<string, unknown>): WaterRightRecord {
   return {
-    wrNumber: attr.WR_NUMBER as string,
-    waterSource: (attr.SOURCE_NAMES as string | null) ?? null,
-    waterType: parseWaterType(attr.SOURCE_TYPES),
-    flowRateGpm: (attr.MAX_FLOW_GPM as number | null) ?? null,
-    volume: (attr.MAX_VOL as number | null) ?? null,
-    priorityDate: parsePriorityDate(attr.ENF_PRTY_DT_DATE, null),
-    status: parseStatus(attr.WR_STATUS),
-    rawData: {
-      source: 'dnrc_geocode',
-      fetchedAt: new Date().toISOString(),
-      geocd: attr.GEOCD ?? null,
-    },
+    number: String(attributes.WR_NUMBER),
+    source: (attributes.SOURCE_NAMES as string | null) ?? null,
+    type: parseWaterType(attributes.SOURCE_TYPES),
+    flowRateGpm: (attributes.MAX_FLOW_GPM as number | null) ?? null,
+    volume: (attributes.MAX_VOL as number | null) ?? null,
+    priorityDate: parsePriorityDate(attributes.ENF_PRTY_DT_DATE, null),
+    status: parseWaterRightStatus(attributes.WR_STATUS),
+    rawData: { source: 'dnrc_geocode', geocd: attributes.GEOCD ?? null },
   };
 }
 
-function fromPouFeature(attr: Record<string, unknown>): MergedRight {
+function placeOfUseMetadata(attributes: Record<string, unknown>): Record<string, unknown> {
   return {
-    wrNumber: attr.WR_NUMBER as string,
-    waterSource: null, // source name lives on Point of Diversion layer, not POU
-    waterType: 'surface', // default; geocode layer will override if present in both
-    flowRateGpm: (attr.MAX_FLOW_GPM as number | null) ?? null,
-    volume: (attr.MAX_VOL as number | null) ?? null,
-    priorityDate: parsePriorityDate(attr.ENF_PRTY_DT_DATE, attr.ENF_PRTY_DT_CHAR),
-    status: parseStatus(attr.WR_STATUS),
-    rawData: {
-      source: 'dnrc_place_of_use',
-      fetchedAt: new Date().toISOString(),
-      owners: attr.OWNERS ?? null,
-      purpose: attr.PURPOSE ?? null,
-      abstractUrl: attr.URL_ABSTRACT ?? null,
-      geocodes: attr.GEOCODES ?? null,
-    },
+    owners: attributes.OWNERS ?? null,
+    purpose: attributes.PURPOSE ?? null,
+    abstractUrl: attributes.URL_ABSTRACT ?? null,
+    geocodes: attributes.GEOCODES ?? null,
   };
 }
 
-function mergeRights(
-  geocodeFeatures: WrqsFeature[],
-  pouFeatures: WrqsFeature[],
-): MergedRight[] {
-  const byWrNumber = new Map<string, MergedRight>();
+function fromPlaceOfUseLayer(attributes: Record<string, unknown>): WaterRightRecord {
+  return {
+    number: String(attributes.WR_NUMBER),
+    // The source name lives on the point-of-diversion layer, which is not queried.
+    source: null,
+    type: 'surface',
+    flowRateGpm: (attributes.MAX_FLOW_GPM as number | null) ?? null,
+    volume: (attributes.MAX_VOL as number | null) ?? null,
+    priorityDate: parsePriorityDate(attributes.ENF_PRTY_DT_DATE, attributes.ENF_PRTY_DT_CHAR),
+    status: parseWaterRightStatus(attributes.WR_STATUS),
+    rawData: { source: 'dnrc_place_of_use', ...placeOfUseMetadata(attributes) },
+  };
+}
 
-  for (const { attributes: attr } of geocodeFeatures) {
-    const wrNumber = attr.WR_NUMBER as string;
-    if (!wrNumber) continue;
-    byWrNumber.set(wrNumber, fromGeocodeFeature(attr));
+/** Merges the two layers by right number. The geocode layer wins because it carries the source name and type. */
+export function mergeWaterRights(geocodeFeatures: WrqsFeature[], placeOfUseFeatures: WrqsFeature[]): WaterRightRecord[] {
+  const byNumber = new Map<string, WaterRightRecord>();
+  for (const { attributes } of geocodeFeatures) {
+    if (attributes.WR_NUMBER) byNumber.set(String(attributes.WR_NUMBER), fromGeocodeLayer(attributes));
   }
-
-  for (const { attributes: attr } of pouFeatures) {
-    const wrNumber = attr.WR_NUMBER as string;
-    if (!wrNumber) continue;
-
-    const existing = byWrNumber.get(wrNumber);
+  for (const { attributes } of placeOfUseFeatures) {
+    if (!attributes.WR_NUMBER) continue;
+    const number = String(attributes.WR_NUMBER);
+    const existing = byNumber.get(number);
     if (existing) {
-      // Found in both — keep geocode fields (have source name/type) but add POU metadata
-      existing.rawData = {
-        ...existing.rawData,
-        source: 'dnrc_both',
-        owners: attr.OWNERS ?? null,
-        purpose: attr.PURPOSE ?? null,
-        abstractUrl: attr.URL_ABSTRACT ?? null,
-        geocodes: attr.GEOCODES ?? null,
-      };
+      existing.rawData = { ...existing.rawData, source: 'dnrc_both', ...placeOfUseMetadata(attributes) };
     } else {
-      byWrNumber.set(wrNumber, fromPouFeature(attr));
+      byNumber.set(number, fromPlaceOfUseLayer(attributes));
     }
   }
-
-  return Array.from(byWrNumber.values());
+  return [...byNumber.values()];
 }
 
-async function seedWaterRights(
-  parcelId: string,
-  parcelIdCode: string,
-  rings: number[][][] | null,
-  lat: number | null,
-  lng: number | null,
-): Promise<void> {
-  const [geocodeFeatures, pouFeatures] = await Promise.all([
-    queryWrqsGeocodes(parcelIdCode),
-    queryWrqsPlaceOfUse(rings, lat, lng),
+async function seedWaterRights(parcel: ParcelRow): Promise<void> {
+  if (!parcel.parcel_number) return;
+  const geometry = parcel.boundary
+    ? polygonGeometryParams((JSON.parse(parcel.boundary) as { coordinates: number[][][] }).coordinates)
+    : parcel.latitude !== null && parcel.longitude !== null
+      ? { ...pointGeometryParams(parcel.latitude, parcel.longitude), distance: '0.1', units: 'esriSRUnit_StatuteMile' }
+      : null;
+
+  const [geocodeFeatures, placeOfUseFeatures] = await Promise.all([
+    queryArcGis(WRQS_GEOCODE_URL, {
+      where: `GEOCD = '${arcGisLiteral(parcel.parcel_number)}'`,
+      outFields: 'WR_NUMBER,WR_STATUS,ENF_PRTY_DT_DATE,SOURCE_NAMES,SOURCE_TYPES,MAX_FLOW_GPM,MAX_VOL,GEOCD',
+      resultRecordCount: '100',
+    }, GIS_TIMEOUT_MS),
+    geometry
+      ? queryArcGis(WRQS_PLACE_OF_USE_URL, {
+          ...geometry,
+          where: '1=1',
+          outFields: 'WR_NUMBER,WR_STATUS,ENF_PRTY_DT_DATE,ENF_PRTY_DT_CHAR,OWNERS,PURPOSE,MAX_FLOW_GPM,MAX_FLOW_CFS,MAX_VOL,GEOCODES,URL_ABSTRACT',
+          resultRecordCount: '100',
+        }, GIS_TIMEOUT_MS)
+      : Promise.resolve([]),
   ]);
 
-  logger.info('WRQS results', {
-    parcelId,
-    geocodeCount: geocodeFeatures.length,
-    pouCount: pouFeatures.length,
-  });
+  const rights = mergeWaterRights(geocodeFeatures, placeOfUseFeatures);
+  logger.info('WRQS results', { parcelId: parcel.id, geocode: geocodeFeatures.length, placeOfUse: placeOfUseFeatures.length });
+  if (rights.length === 0) return;
 
-  const merged = mergeRights(geocodeFeatures, pouFeatures);
-
-  if (merged.length === 0) return;
-
+  const fetchedAt = new Date().toISOString();
   await execute(
     `INSERT INTO water_rights
        (parcel_id, water_right_number, water_source, water_type, flow_rate, volume, priority_date, status, raw_data)
-     SELECT
-       $1::uuid,
-       unnest($2::text[]),
-       unnest($3::text[]),
-       unnest($4::text[]),
-       unnest($5::numeric[]),
-       unnest($6::numeric[]),
-       unnest($7::date[]),
-       unnest($8::text[]),
-       unnest($9::jsonb[])
+     SELECT $1::uuid, unnest($2::text[]), unnest($3::text[]), unnest($4::text[]), unnest($5::numeric[]),
+            unnest($6::numeric[]), unnest($7::date[]), unnest($8::text[]), unnest($9::jsonb[])
      ON CONFLICT (parcel_id, water_right_number) DO UPDATE SET
        water_source  = COALESCE(EXCLUDED.water_source, water_rights.water_source),
        flow_rate     = COALESCE(EXCLUDED.flow_rate, water_rights.flow_rate),
@@ -347,559 +394,50 @@ async function seedWaterRights(
        status        = EXCLUDED.status,
        raw_data      = water_rights.raw_data || EXCLUDED.raw_data`,
     [
-      parcelId,
-      merged.map((r) => r.wrNumber),
-      merged.map((r) => r.waterSource),
-      merged.map((r) => r.waterType),
-      merged.map((r) => r.flowRateGpm),
-      merged.map((r) => r.volume),
-      merged.map((r) => r.priorityDate),
-      merged.map((r) => r.status),
-      merged.map((r) => JSON.stringify(r.rawData)),
+      parcel.id,
+      rights.map((r) => r.number),
+      rights.map((r) => r.source),
+      rights.map((r) => r.type),
+      rights.map((r) => r.flowRateGpm),
+      rights.map((r) => r.volume),
+      rights.map((r) => r.priorityDate),
+      rights.map((r) => r.status),
+      rights.map((r) => JSON.stringify({ ...r.rawData, fetchedAt })),
     ]
   );
 }
 
-interface CensusGeocodeResponse {
-  result?: {
-    addressMatches?: Array<{
-      coordinates?: { x: number; y: number };
-    }>;
-  };
-}
-
-async function geocodeAddress(q: string): Promise<{ lat: number; lng: number } | null> {
-  const params = new URLSearchParams({
-    address: q,
-    benchmark: 'Public_AR_Current',
-    format: 'json',
-  });
-
+async function persist(feature: CadastralFeature): Promise<Parcel> {
+  const row = await upsertParcel(feature);
   try {
-    const data = await fetchGis(`${CENSUS_GEOCODER_URL}?${params}`) as CensusGeocodeResponse;
-    const coords = data.result?.addressMatches?.[0]?.coordinates;
-    if (!coords) return null;
-    return { lat: coords.y, lng: coords.x };
+    await seedWaterRights(row);
   } catch (err) {
-    logger.warn('Census geocoder failed', { error: String(err) });
-    return null;
+    logger.warn('Water rights seed failed', { parcelId: row.id, error: String(err) });
   }
+  return toParcel(row);
 }
 
-function parseAddressParts(q: string): { street: string; city: string; state: string; zip?: string } | null {
-  // Expect "123 Main St, City, ST 12345" or "123 Main St, City, ST"
-  const parts = q.split(',').map((s) => s.trim());
-  if (parts.length < 3) return null;
-  const street = parts[0];
-  const city = parts[1];
-  const stateZip = parts[2] ?? '';
-  const m = stateZip.match(/^([A-Za-z]{2})\s*(\d{5})?/);
-  if (!m || !street || !city) return null;
-  return { street, city, state: m[1]!, zip: m[2] };
-}
-
-async function geocodeAddressStructured(q: string): Promise<{ lat: number; lng: number } | null> {
-  const parts = parseAddressParts(q);
-  if (!parts) return null;
-
-  const params = new URLSearchParams({
-    street: parts.street,
-    city: parts.city,
-    state: parts.state,
-    benchmark: 'Public_AR_Current',
-    format: 'json',
-  });
-  if (parts.zip) params.set('zip', parts.zip);
-
-  try {
-    const data = await fetchGis(`${CENSUS_GEOCODER_STRUCTURED_URL}?${params}`) as CensusGeocodeResponse;
-    const coords = data.result?.addressMatches?.[0]?.coordinates;
-    if (!coords) return null;
-    return { lat: coords.y, lng: coords.x };
-  } catch (err) {
-    logger.warn('Census structured geocoder failed', { error: String(err) });
-    return null;
-  }
-}
-
-async function geocodeWithNominatim(q: string): Promise<{ lat: number; lng: number } | null> {
-  const params = new URLSearchParams({ q, format: 'json', limit: '1', countrycodes: 'us' });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'landfinder/1.0 (hcsneden@gmail.com)' },
-    });
-    if (!res.ok) throw new Error(`Nominatim HTTP ${res.status}`);
-    const data = await res.json() as Array<{ lat: string; lon: string }>;
-    const first = data[0];
-    if (!first) return null;
-    return { lat: parseFloat(first.lat), lng: parseFloat(first.lon) };
-  } catch (err) {
-    logger.warn('Nominatim geocoder failed', { error: String(err) });
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function parseStreetNumber(street: string): { num: number | null; name: string } {
-  const m = street.match(/^(\d+)\s+(.+)/);
-  if (!m) return { num: null, name: street };
-  // Strip trailing street type so it matches MontanaStructuresAddresses St_Name (no suffix stored)
-  const name = (m[2] ?? '').replace(/\s+(rd|road|st|street|ave|avenue|ln|lane|dr|drive|way|blvd|ct|court|pl|place|hwy|highway|loop|trl|trail|run|cir|circle|pike|row)\.?$/i, '').trim();
-  return { num: parseInt(m[1]!), name };
-}
-
-async function lookupCadastralById(parcelId: string): Promise<CadastralFeature | null> {
-  const safe = parcelId.replace(/'/g, "''").replace(/[;\\]/g, '');
-  const params = new URLSearchParams({
-    where: `PARCELID = '${safe}'`,
-    outFields: 'PARCELID,CountyName,AddressLine1,CityStateZip,TotalAcres,GISAcres,TotalBuildingValue,PropType,Subdivision,TotalValue',
-    returnGeometry: 'true',
-    outSR: '4326',
-    resultRecordCount: '1',
-    f: 'json',
-  });
-  const data = await fetchGis(`${CADASTRAL_URL}?${params}`) as { features?: CadastralFeature[]; error?: { message: string } };
-  if (data.error) {
-    logger.warn('Cadastral ID lookup error', { message: data.error.message });
-    return null;
-  }
-  return data.features?.[0] ?? null;
-}
-
-async function lookupByAddressPoint(q: string): Promise<CadastralFeature | null> {
-  const streetPart = extractStreetAddress(q);
-  const cityPart = q.split(',')[1]?.trim() ?? '';
-  const { num, name } = parseStreetNumber(streetPart);
-  if (num === null || num === 0 || !name) return null;
-
-  const safeCity = sanitizeLike(cityPart);
-
-  const cityClause = safeCity ? ` AND UPPER(Post_Comm) LIKE UPPER('%${safeCity}%')` : '';
-  const where = `Add_Number = ${num} AND (${likeAnyVariant('St_Name', name)})${cityClause}`;
-
-  const params = new URLSearchParams({
-    where,
-    outFields: 'ParcelID,Add_Number,St_Name,Post_Comm',
-    resultRecordCount: '1',
-    f: 'json',
-  });
-
-  interface AddressPointResponse {
-    features?: Array<{ attributes: { ParcelID?: string | null } }>;
-    error?: { message: string };
-  }
-
-  const data = await fetchGis(`${MSDI_ADDRESS_URL}?${params}`) as AddressPointResponse;
-  if (data.error) {
-    logger.warn('Montana address point lookup error', { message: data.error.message });
-    return null;
-  }
-
-  const parcelId = data.features?.[0]?.attributes?.ParcelID;
-  if (!parcelId) return null;
-
-  logger.info('Montana address point matched', { q, parcelId });
-  return lookupCadastralById(parcelId);
-}
-
-async function lookupCadastralByPoint(lat: number, lng: number): Promise<CadastralFeature | null> {
-  const params = new URLSearchParams({
-    geometry: JSON.stringify({ x: lng, y: lat }),
-    geometryType: 'esriGeometryPoint',
-    spatialRel: 'esriSpatialRelIntersects',
-    inSR: '4326',
-    outFields: 'PARCELID,CountyName,AddressLine1,CityStateZip,TotalAcres,GISAcres,TotalBuildingValue,PropType,Subdivision,TotalValue',
-    returnGeometry: 'true',
-    outSR: '4326',
-    resultRecordCount: '1',
-    f: 'json',
-  });
-
-  const data = await fetchGis(`${CADASTRAL_URL}?${params}`) as { features?: CadastralFeature[]; error?: { message: string } };
-
-  if (data.error) {
-    logger.error('Cadastral spatial query error', { message: data.error.message });
-    return null;
-  }
-
-  return data.features?.[0] ?? null;
-}
-
-function isTbdAddress(q: string): boolean {
-  // "TBD Foo Rd" or "0 Foo Rd" — both mean no specific house number
-  return /^\s*(tbd|0)\s+/i.test(q);
-}
-
-// Rural subdivision listings are often phrased "Nhn Foo Rd Lot 69" (no house number,
-// lot 69), but county E911/cadastral records assign that lot number as the actual
-// situs address ("69 Foo Rd"). Rewriting to that form lets the normal house-number
-// lookup paths match directly instead of falling back to fuzzy/geocoded search.
-function rewriteLotNumberAsHouseNumber(q: string): string | null {
-  const street = extractStreetAddress(q);
-  if (/^\s*\d+\s+/.test(street)) return null; // already has a leading house number
-
-  const m = street.match(/^(.*?)\s+lot\s*#?\s*(\d+)\s*$/i);
-  if (!m) return null;
-
-  const roadPart = (m[1] ?? '').replace(/^\s*(nhn|tbd|0)\s+/i, '').trim();
-  const lotNum = m[2];
-  if (!roadPart || !lotNum) return null;
-
-  const rest = q.slice(street.length);
-  return `${lotNum} ${roadPart}${rest}`;
-}
-
-function extractRoadName(q: string): string | null {
-  // "Tbd Arcturus Dr, Emigrant, MT 59027" or "0 Arcturus Dr, ..." → "Arcturus Dr"
-  const withoutPrefix = q.replace(/^\s*(tbd|0)\s+/i, '').trim();
-  const road = withoutPrefix.split(',')[0]?.trim() ?? '';
-  return road.length >= 3 ? road : null;
-}
-
-// Last-resort fallback once every exact-match strategy has missed: strip whatever
-// house number/lot/prefix is present and search by road name alone, so we can offer
-// the user a pick-list instead of a flat "not found".
-function extractGenericRoadName(q: string): string | null {
-  let road = extractStreetAddress(q);
-  road = road.replace(/^\s*\d+\s+/, '');
-  road = road.replace(/^\s*(nhn|tbd)\s+/i, '');
-  road = road.replace(/\s+lot\s*#?\s*\d+\s*$/i, '');
-  road = road.trim();
-  return road.length >= 3 ? road : null;
-}
-
-function toParcelCandidates(features: CadastralFeature[]): ParcelCandidate[] {
-  return features.map((f) => ({
-    parcelId: f.attributes.PARCELID,
-    address: f.attributes.AddressLine1
-      ? `${f.attributes.AddressLine1.trim()}${f.attributes.CityStateZip ? ', ' + f.attributes.CityStateZip.trim() : ''}`
-      : null,
-    acreage: f.attributes.TotalAcres ?? f.attributes.GISAcres ?? null,
-    county: f.attributes.CountyName ?? null,
-    subdivision: f.attributes.Subdivision ?? null,
-    totalValue: f.attributes.TotalValue ?? null,
-    forSale: null,
-    listingSummary: null,
-  }));
-}
-
-// Listing status is only worth checking for a bounded number of candidates — each
-// check is a Claude + web-search call, so capping keeps latency/cost predictable.
-const LISTING_CHECK_CANDIDATE_CAP = 10;
-
-async function enrichCandidatesWithListingStatus(
-  features: CadastralFeature[]
-): Promise<ParcelCandidate[]> {
-  const base = toParcelCandidates(features);
-  const toCheck = base.slice(0, LISTING_CHECK_CANDIDATE_CAP);
-
-  const results = await Promise.allSettled(
-    toCheck.map((c) =>
-      c.address ? getOrCheckListingStatus(c.parcelId, c.address) : Promise.resolve(null)
-    )
-  );
-
-  const enriched = base.map((c, i) => {
-    if (i >= toCheck.length) return c;
-    const r = results[i];
-    if (r && r.status === 'fulfilled' && r.value) {
-      return { ...c, forSale: r.value.forSale, listingSummary: r.value.summary };
-    }
-    return c;
-  });
-
-  // Surface the one actually for sale, without hiding how many parcels matched.
-  return [...enriched.filter((c) => c.forSale), ...enriched.filter((c) => !c.forSale)];
-}
-
-async function lookupCadastralCandidates(road: string): Promise<CadastralFeature[]> {
-  const params = new URLSearchParams({
-    where: likeAnyVariant('AddressLine1', road),
-    outFields: 'PARCELID,CountyName,AddressLine1,CityStateZip,TotalAcres,GISAcres,TotalBuildingValue,PropType,Subdivision,TotalValue',
-    returnGeometry: 'true',
-    outSR: '4326',
-    resultRecordCount: '50',
-    orderByFields: 'TotalAcres DESC',
-    f: 'json',
-  });
-
-  const data = await fetchGis(`${CADASTRAL_URL}?${params}`) as { features?: CadastralFeature[]; error?: { message: string } };
-  if (data.error) {
-    logger.error('Cadastral candidate query error', { message: data.error.message });
-    return [];
-  }
-  return data.features ?? [];
-}
-
-async function lookupCadastral(q: string): Promise<CadastralFeature | null> {
-  const street = extractStreetAddress(q);
-  const safeId = sanitizeLike(q);
-
-  const where =
-    `(${likeAnyVariant('AddressLine1', street)})` +
-    ` OR UPPER(PARCELID) LIKE UPPER('%${safeId}%')`;
-
-  const params = new URLSearchParams({
-    where,
-    outFields: 'PARCELID,CountyName,AddressLine1,CityStateZip,TotalAcres,GISAcres,TotalBuildingValue,PropType,Subdivision,TotalValue',
-    returnGeometry: 'true',
-    outSR: '4326',
-    resultRecordCount: '1',
-    f: 'json',
-  });
-
-  const data = await fetchGis(`${CADASTRAL_URL}?${params}`) as { features?: CadastralFeature[]; error?: { message: string } };
-
-  if (data.error) {
-    logger.error('Cadastral API error', { message: data.error.message });
-    return null;
-  }
-
-  return data.features?.[0] ?? null;
-}
-
-interface UpsertedParcel {
-  id: string;
-  state: string;
-  county: string | null;
-  parcel_number: string | null;
-  geo_id: string | null;
-  address: string | null;
-  acreage: number | null;
-  building_value: number | null;
-  prop_type: string | null;
-  longitude: number | null;
-  latitude: number | null;
-  boundary: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-async function upsertParcelRecord(feature: CadastralFeature): Promise<UpsertedParcel> {
-  const { attributes: attr, geometry } = feature;
-
-  let latitude: number | null = null;
-  let longitude: number | null = null;
-  let boundaryGeoJson: string | null = null;
-
-  if (geometry?.rings) {
-    boundaryGeoJson = JSON.stringify({ type: 'Polygon', coordinates: geometry.rings });
-    const centroid = calculateCentroid(geometry.rings);
-    if (centroid) {
-      latitude = centroid.lat;
-      longitude = centroid.lng;
-    }
-  }
-
-  const acreage = attr.TotalAcres ?? attr.GISAcres ?? null;
-
-  const address = attr.AddressLine1
-    ? `${attr.AddressLine1.trim()}${attr.CityStateZip ? ', ' + attr.CityStateZip.trim() : ''}`
-    : null;
-
-  const sqlParams: unknown[] = [
-    'MT',
-    attr.CountyName || null,
-    attr.PARCELID,
-    attr.PARCELID,
-    address,
-    acreage,
-    attr.TotalBuildingValue ?? null,
-    attr.PropType ?? null,
-  ];
-
-  let coordsSql = 'NULL';
-  if (latitude != null && longitude != null) {
-    sqlParams.push(longitude, latitude);
-    coordsSql = `ST_SetSRID(ST_MakePoint($${sqlParams.length - 1}, $${sqlParams.length}), 4326)`;
-  }
-
-  let boundarySql = 'NULL';
-  if (boundaryGeoJson != null) {
-    sqlParams.push(boundaryGeoJson);
-    boundarySql = `ST_GeomFromGeoJSON($${sqlParams.length})`;
-  }
-
-  const sql = `
-    INSERT INTO parcels (state, county, parcel_number, geo_id, address, acreage, building_value, prop_type, coordinates, boundary, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${coordsSql}, ${boundarySql}, NOW(), NOW())
-    ON CONFLICT (state, parcel_number) DO UPDATE SET
-      county         = EXCLUDED.county,
-      geo_id         = EXCLUDED.geo_id,
-      address        = EXCLUDED.address,
-      acreage        = EXCLUDED.acreage,
-      building_value = EXCLUDED.building_value,
-      prop_type      = EXCLUDED.prop_type,
-      coordinates    = COALESCE(EXCLUDED.coordinates, parcels.coordinates),
-      boundary       = COALESCE(EXCLUDED.boundary, parcels.boundary),
-      updated_at     = NOW()
-    RETURNING
-      id, state, county, parcel_number, geo_id, address, acreage, building_value, prop_type,
-      ST_X(coordinates::geometry) as longitude,
-      ST_Y(coordinates::geometry) as latitude,
-      ST_AsGeoJSON(boundary)::text as boundary,
-      created_at, updated_at
-  `;
-
-  const rows = await query<UpsertedParcel>(sql, sqlParams);
-  const firstRow = rows[0];
-  if (!firstRow) throw new Error('No row returned from parcel upsert');
-  return firstRow;
-}
-
-export async function handler(
-  event: APIGatewayProxyEvent,
-  context: Context
-): Promise<APIGatewayProxyResult> {
+export async function handler(event: APIGatewayProxyEvent, context: Context): Promise<APIGatewayProxyResult> {
   logger.addContext(context);
-
   try {
-    const rawQ = event.queryStringParameters?.q?.trim();
-    if (!rawQ || rawQ.length < 3) {
-      return badRequest('Query parameter "q" is required (minimum 3 characters)');
-    }
+    const rawQuery = event.queryStringParameters?.q?.trim();
+    if (!rawQuery || rawQuery.length < 3) return badRequest('Query parameter "q" is required (minimum 3 characters)');
 
-    // Start a paused Aurora resuming now, in parallel with the Cadastral calls below,
-    // instead of paying the full resume when the first upsert runs. Fire and forget:
-    // the upsert has its own resume retries if this has not finished by then.
+    // Start an Aurora resume now, in parallel with the GIS calls. The upsert
+    // has its own resume retries if this has not finished.
     void query('SELECT 1').catch(() => undefined);
 
-    const lotRewrite = rewriteLotNumberAsHouseNumber(rawQ);
-    const q = lotRewrite ?? rawQ;
-    if (lotRewrite) {
-      logger.info('Rewrote lot-number address to house-number form', { original: rawQ, rewritten: lotRewrite });
+    const q = lotNumberAsHouseNumber(rawQuery) ?? rawQuery;
+    const resolution = await resolve(q);
+    if (!resolution) return success(null);
+    if (resolution.kind === 'candidates') {
+      logger.info('Lookup returned candidates', { q, road: resolution.road, count: resolution.features.length });
+      return success(await toCandidates(resolution.features, resolution.road));
     }
-
-    // TBD addresses have no street number — try road-name candidate search first
-    if (isTbdAddress(q)) {
-      const road = extractRoadName(q);
-      if (road) {
-        const candidates = await lookupCadastralCandidates(road);
-        if (candidates.length > 1) {
-          logger.info('TBD address returned candidates', { q, road, count: candidates.length });
-          return success({ candidates: await enrichCandidatesWithListingStatus(candidates), roadName: road });
-        }
-        if (candidates.length === 1) {
-          // Exactly one parcel on this road — use it directly. Falling through to
-          // lookupCadastral would re-query with the "0 " prefix in the LIKE clause,
-          // which misses parcels stored without a house number in the cadastral data.
-          const feature = candidates[0]!;
-          const row = await upsertParcelRecord(feature);
-          if (feature.attributes.PARCELID) {
-            const rings = feature.geometry?.rings ?? null;
-            const centroid = rings ? calculateCentroid(rings) : null;
-            try {
-              await seedWaterRights(row.id, feature.attributes.PARCELID, rings, centroid?.lat ?? null, centroid?.lng ?? null);
-            } catch (err) {
-              logger.warn('Water rights fetch failed during TBD lookup', { parcelId: row.id, error: String(err) });
-            }
-          }
-          const parcel: Parcel = {
-            id: row.id, state: row.state, county: row.county,
-            parcelNumber: row.parcel_number, geoId: row.geo_id, address: row.address,
-            acreage: row.acreage, buildingValue: row.building_value, propType: row.prop_type,
-            coordinates: row.latitude != null && row.longitude != null
-              ? { latitude: row.latitude, longitude: row.longitude } : null,
-            boundary: row.boundary ? JSON.parse(row.boundary) as Parcel['boundary'] : null,
-            createdAt: row.created_at, updatedAt: row.updated_at,
-          };
-          logger.info('TBD address resolved to single candidate', { q, road, parcelId: parcel.id });
-          return success(parcel);
-        }
-        // 0 results: fall through to other lookup strategies
-      }
-    }
-
-    let feature = await lookupCadastral(q);
-
-    if (!feature) {
-      feature = await lookupByAddressPoint(q);
-    }
-
-    if (!feature) {
-      let coords = await geocodeAddress(q);
-      if (!coords) {
-        coords = await geocodeAddressStructured(q);
-      }
-      if (!coords) {
-        logger.info('Census geocoders missed, trying Nominatim fallback', { q });
-        coords = await geocodeWithNominatim(q);
-      }
-      if (coords) {
-        logger.info('Geocode succeeded, trying spatial fallback', { q, coords });
-        feature = await lookupCadastralByPoint(coords.lat, coords.lng);
-      }
-    }
-
-    if (!feature) {
-      // Every exact-match strategy missed — try the road name alone so we can offer
-      // a pick-list instead of a flat "not found" when several parcels share it.
-      const road = extractGenericRoadName(q);
-      if (road) {
-        const candidates = await lookupCadastralCandidates(road);
-        if (candidates.length > 1) {
-          logger.info('Fallback road search returned candidates', { q, road, count: candidates.length });
-          return success({ candidates: await enrichCandidatesWithListingStatus(candidates), roadName: road });
-        }
-        if (candidates.length === 1) {
-          feature = candidates[0]!;
-          logger.info('Fallback road search resolved to single candidate', { q, road });
-        }
-      }
-    }
-
-    if (!feature) {
-      return success(null);
-    }
-
-    const row = await upsertParcelRecord(feature);
-
-    if (feature.attributes.PARCELID) {
-      const rings = feature.geometry?.rings ?? null;
-      const centroid = rings ? calculateCentroid(rings) : null;
-      try {
-        await seedWaterRights(
-          row.id,
-          feature.attributes.PARCELID,
-          rings,
-          centroid?.lat ?? null,
-          centroid?.lng ?? null,
-        );
-      } catch (err) {
-        logger.warn('Water rights fetch failed during lookup', { parcelId: row.id, error: String(err) });
-      }
-    }
-
-    const parcel: Parcel = {
-      id: row.id,
-      state: row.state,
-      county: row.county,
-      parcelNumber: row.parcel_number,
-      geoId: row.geo_id,
-      address: row.address,
-      acreage: row.acreage,
-      buildingValue: row.building_value,
-      propType: row.prop_type,
-      coordinates:
-        row.latitude != null && row.longitude != null
-          ? { latitude: row.latitude, longitude: row.longitude }
-          : null,
-      boundary: row.boundary ? JSON.parse(row.boundary) as Parcel['boundary'] : null,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
-
-    return success(parcel);
+    return success(await persist(resolution.feature));
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error('Parcel lookup error', { error: msg });
-    if (msg.includes('timed out')) {
-      return errorResponse(503, 'SERVICE_UNAVAILABLE', 'The parcel lookup service is temporarily slow. Please try again.');
-    }
+    logger.error('Parcel lookup error', { error: String(err) });
+    if (isTimeoutError(err)) return serviceUnavailable('The parcel lookup service is temporarily slow. Please try again.');
     return serverError('An error occurred during parcel lookup');
   }
 }

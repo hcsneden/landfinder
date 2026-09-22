@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useAuthStore } from '../../hooks/useAuthStore';
 
 export default function ProfileScreen() {
-  const { user, logout, isAuthenticated } = useAuthStore();
+  const { user, clearSession } = useAuthStore();
 
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -12,30 +12,12 @@ export default function ProfileScreen() {
         text: 'Sign Out',
         style: 'destructive',
         onPress: async () => {
-          await logout();
+          await clearSession();
           router.replace('/(auth)/login');
         },
       },
     ]);
   };
-
-  if (!isAuthenticated) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.notLoggedIn}>
-          <Text style={styles.notLoggedInText}>
-            Sign in to save parcels and track your searches
-          </Text>
-          <TouchableOpacity
-            style={styles.signInButton}
-            onPress={() => router.push('/(auth)/login')}
-          >
-            <Text style={styles.signInButtonText}>Sign In</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
@@ -46,45 +28,7 @@ export default function ProfileScreen() {
           </Text>
         </View>
         <Text style={styles.email}>{user?.email}</Text>
-        <Text style={styles.userId}>ID: {user?.id.slice(0, 8)}...</Text>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Account</Text>
-
-        <TouchableOpacity style={styles.menuItem}>
-          <Text style={styles.menuItemText}>Search History</Text>
-          <Text style={styles.menuItemArrow}>→</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.menuItem}>
-          <Text style={styles.menuItemText}>Notifications</Text>
-          <Text style={styles.menuItemArrow}>→</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.menuItem}>
-          <Text style={styles.menuItemText}>Privacy Settings</Text>
-          <Text style={styles.menuItemArrow}>→</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Support</Text>
-
-        <TouchableOpacity style={styles.menuItem}>
-          <Text style={styles.menuItemText}>Help Center</Text>
-          <Text style={styles.menuItemArrow}>→</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.menuItem}>
-          <Text style={styles.menuItemText}>Contact Us</Text>
-          <Text style={styles.menuItemArrow}>→</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.menuItem}>
-          <Text style={styles.menuItemText}>About Last Best Land</Text>
-          <Text style={styles.menuItemArrow}>→</Text>
-        </TouchableOpacity>
+        <Text style={styles.userId}>ID {user?.id.slice(0, 8)}</Text>
       </View>
 
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -100,29 +44,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  notLoggedIn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-  },
-  notLoggedInText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  signInButton: {
-    backgroundColor: '#1a5f2a',
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 8,
-  },
-  signInButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
   profileCard: {
     backgroundColor: '#1a5f2a',
@@ -153,34 +74,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.7)',
     fontFamily: 'monospace',
-  },
-  section: {
-    backgroundColor: '#fff',
-    marginTop: 16,
-    paddingHorizontal: 16,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#999',
-    paddingVertical: 12,
-    textTransform: 'uppercase',
-  },
-  menuItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  menuItemText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  menuItemArrow: {
-    fontSize: 16,
-    color: '#ccc',
   },
   logoutButton: {
     marginHorizontal: 16,

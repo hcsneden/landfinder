@@ -1,21 +1,17 @@
 import { Tabs } from 'expo-router';
-import { Text, View, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
-function TabIcon({ name, focused }: { name: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    search: '🔍',
-    map: '🗺️',
-    saved: '❤️',
-    profile: '👤',
-  };
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
-  return (
-    <View style={styles.iconContainer}>
-      <Text style={[styles.icon, focused && styles.iconFocused]}>
-        {icons[name] || '📍'}
-      </Text>
-    </View>
-  );
+const TAB_ICONS: Record<string, IconName> = {
+  search: 'search',
+  map: 'map',
+  saved: 'heart',
+  profile: 'person',
+};
+
+function TabIcon({ name, color }: { name: string; color: string }) {
+  return <Ionicons name={TAB_ICONS[name] ?? 'location'} size={22} color={color} />;
 }
 
 export default function TabsLayout() {
@@ -47,7 +43,7 @@ export default function TabsLayout() {
         options={{
           title: 'Search',
           headerTitle: 'Find Land',
-          tabBarIcon: ({ focused }) => <TabIcon name="search" focused={focused} />,
+          tabBarIcon: ({ color }) => <TabIcon name="search" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -55,7 +51,7 @@ export default function TabsLayout() {
         options={{
           title: 'Map',
           headerTitle: 'Browse Map',
-          tabBarIcon: ({ focused }) => <TabIcon name="map" focused={focused} />,
+          tabBarIcon: ({ color }) => <TabIcon name="map" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -63,7 +59,7 @@ export default function TabsLayout() {
         options={{
           title: 'Saved',
           headerTitle: 'Saved Parcels',
-          tabBarIcon: ({ focused }) => <TabIcon name="saved" focused={focused} />,
+          tabBarIcon: ({ color }) => <TabIcon name="saved" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -71,23 +67,10 @@ export default function TabsLayout() {
         options={{
           title: 'Profile',
           headerTitle: 'My Account',
-          tabBarIcon: ({ focused }) => <TabIcon name="profile" focused={focused} />,
+          tabBarIcon: ({ color }) => <TabIcon name="profile" color={color} />,
         }}
       />
     </Tabs>
   );
 }
 
-const styles = StyleSheet.create({
-  iconContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  icon: {
-    fontSize: 20,
-    opacity: 0.5,
-  },
-  iconFocused: {
-    opacity: 1,
-  },
-});

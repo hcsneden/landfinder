@@ -7,70 +7,53 @@ import { ApiStack } from '../lib/api-stack';
 import { ScrapingStack } from '../lib/scraping-stack';
 import { WebStack } from '../lib/web-stack';
 
+const LOCAL_ORIGINS = ['http://localhost:5173', 'http://localhost:3001'];
+
 const app = new cdk.App();
 
 const env = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
-  region: process.env.CDK_DEFAULT_REGION || 'us-west-2',
+  region: process.env.CDK_DEFAULT_REGION ?? 'us-west-2',
 };
 
-// Authentication stack (Cognito)
+// Comma-separated list of browser origins allowed to call the API. deploy.sh
+// sets it from the CloudFront URL. Without it only local development works.
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((origin) => origin.trim()) ?? LOCAL_ORIGINS;
+
 const authStack = new AuthStack(app, 'LandFinderAuthStack', {
   env,
-  description: 'LandFinder Authentication - Cognito User Pool',
+  description: 'LandFinder authentication: Cognito user pool',
 });
 
-// Database stack (RDS PostgreSQL + DynamoDB)
 const databaseStack = new DatabaseStack(app, 'LandFinderDatabaseStack', {
   env,
-  description: 'LandFinder Database - RDS PostgreSQL and DynamoDB',
+  description: 'LandFinder data: Aurora Serverless v2 and DynamoDB',
 });
 
-// CORS origins: set ALLOWED_ORIGINS env var to a comma-separated list of origins before deploying.
-// Example: ALLOWED_ORIGINS=https://app.landfinder.com,https://www.landfinder.com
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-  : ['http://localhost:5173', 'http://localhost:3001']; // local dev
-
-// API stack (API Gateway + Lambda)
 const apiStack = new ApiStack(app, 'LandFinderApiStack', {
   env,
-  description: 'LandFinder API - API Gateway and Lambda functions',
+  description: 'LandFinder API: API Gateway and Lambda',
   userPool: authStack.userPool,
   userPoolClient: authStack.userPoolClient,
   database: databaseStack.database,
-  vpc: databaseStack.vpc,
-  usersTable: databaseStack.usersTable,
   searchesTable: databaseStack.searchesTable,
+  parcelCacheTable: databaseStack.parcelCacheTable,
   allowedOrigins,
+  geocoderContactEmail: process.env.GEOCODER_CONTACT_EMAIL ?? '',
 });
 
-// Scraping stack (ECS Fargate + Step Functions)
 const scrapingStack = new ScrapingStack(app, 'LandFinderScrapingStack', {
   env,
-  description: 'LandFinder Scraping - ECS Fargate workers and Step Functions',
+  description: 'LandFinder scrapers: ECS Fargate tasks and Step Functions',
   database: databaseStack.database,
   vpc: databaseStack.vpc,
 });
 
-// Web hosting stack (S3 + CloudFront)
-const webStack = new WebStack(app, 'LandFinderWebStack', {
+new WebStack(app, 'LandFinderWebStack', {
   env,
-  description: 'LandFinder Web - S3 + CloudFront static hosting',
+  description: 'LandFinder web app: S3 and CloudFront',
 });
 
-// Add dependencies
 apiStack.addDependency(authStack);
 apiStack.addDependency(databaseStack);
 scrapingStack.addDependency(databaseStack);
-
-// Output important values
-new cdk.CfnOutput(authStack, 'UserPoolId', {
-  value: authStack.userPool.userPoolId,
-  description: 'Cognito User Pool ID',
-});
-
-new cdk.CfnOutput(authStack, 'UserPoolClientId', {
-  value: authStack.userPoolClient.userPoolClientId,
-  description: 'Cognito User Pool Client ID',
-});

@@ -15,9 +15,9 @@ import (
 
 // fakeStore is an in-memory Store for tests.
 type fakeStore struct {
-	mu       sync.Mutex
-	parcels  []CadastralFeature
-	rights   map[string][]MergedRight
+	mu      sync.Mutex
+	parcels []CadastralFeature
+	rights  map[string][]MergedRight
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{rights: map[string][]MergedRight{}} }

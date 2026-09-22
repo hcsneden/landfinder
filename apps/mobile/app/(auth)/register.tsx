@@ -13,12 +13,14 @@ import {
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { useAuthStore } from '../../hooks/useAuthStore';
+import { authApi } from '../../services/api';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const { register, isLoading } = useAuthStore();
+  const setSession = useAuthStore((state) => state.setSession);
+  const [isLoading, setIsLoading] = useState(false);
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -46,15 +48,15 @@ export default function RegisterScreen() {
       return;
     }
 
-    try {
-      await register(email.trim(), password);
-      router.replace('/(tabs)/search');
-    } catch (error) {
-      Alert.alert(
-        'Registration Failed',
-        error instanceof Error ? error.message : 'An error occurred'
-      );
+    setIsLoading(true);
+    const response = await authApi.register(email.trim(), password);
+    setIsLoading(false);
+    if (!response.success || !response.data) {
+      Alert.alert('Registration failed', response.error?.message ?? 'An error occurred');
+      return;
     }
+    await setSession(response.data);
+    router.replace('/(tabs)/search');
   };
 
   return (

@@ -7,22 +7,20 @@ import { useEffect } from 'react';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 5, // 5 minutes
+      staleTime: 5 * 60 * 1000,
       retry: 2,
     },
   },
 });
 
 export default function RootLayout() {
-  const { checkAuth, isLoading } = useAuthStore();
+  const { restoreSession, isRestoring } = useAuthStore();
 
   useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+    void restoreSession();
+  }, [restoreSession]);
 
-  if (isLoading) {
-    return null; // Could show a splash screen here
-  }
+  if (isRestoring) return null;
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -1,8 +1,11 @@
 import { useActionState, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Input, Typography } from '@hcsneden/design-library'
 import { authApi } from '../services/api'
 import { useStore } from '../store'
+
+const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD
 
 const FEATURES = [
   'DNRC water rights with priority dates',
@@ -25,7 +28,7 @@ export function AuthPage() {
           </div>
           <p className="auth-aside-tagline">
             Complete due diligence on Montana land before you make an offer.
-            Water rights, road access, buildability, and environmental risk — in one place.
+            Water rights, road access, buildability, and environmental risk in one place.
           </p>
           <div className="auth-aside-features">
             {FEATURES.map((f) => (
@@ -50,8 +53,12 @@ export function AuthPage() {
           </Typography>
         </div>
 
-        {/* key remounts AuthForm on mode switch, resetting action state and clearing errors */}
+        {/* The key remounts the form when the mode changes, which clears its error state. */}
         <AuthForm key={mode} mode={mode} />
+
+        {mode === 'login' && DEMO_EMAIL && DEMO_PASSWORD && (
+          <DemoSignIn email={DEMO_EMAIL} password={DEMO_PASSWORD} />
+        )}
 
         <p className="auth-switch">
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
@@ -68,8 +75,20 @@ export function AuthPage() {
   )
 }
 
+/**
+ * Where to land after signing in. Saving a parcel sends the visitor here with a
+ * `next` pointing back at that parcel. Relative paths only, so the parameter
+ * cannot be used to bounce someone to another site.
+ */
+function useNextPath(): string {
+  const [params] = useSearchParams()
+  const next = params.get('next')
+  return next && next.startsWith('/') && !next.startsWith('//') ? next : '/'
+}
+
 function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const navigate = useNavigate()
+  const nextPath = useNextPath()
   const setAuth = useStore((state) => state.setAuth)
 
   const [error, formAction, isPending] = useActionState(
@@ -80,8 +99,8 @@ function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         ? await authApi.login(email, password)
         : await authApi.register(email, password)
       if (!res.success || !res.data) return res.error?.message ?? 'Something went wrong'
-      setAuth(res.data.user, res.data.tokens)
-      navigate('/')
+      setAuth(res.data)
+      navigate(nextPath)
       return null
     },
     null,
@@ -116,5 +135,46 @@ function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           : mode === 'login' ? 'Sign in' : 'Create account'}
       </Button>
     </form>
+  )
+}
+
+function DemoSignIn({ email, password }: { email: string; password: string }) {
+  const navigate = useNavigate()
+  const nextPath = useNextPath()
+  const setAuth = useStore((state) => state.setAuth)
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, setIsPending] = useState(false)
+
+  async function signIn() {
+    setError(null)
+    setIsPending(true)
+    const res = await authApi.login(email, password)
+    if (!res.success || !res.data) {
+      setError(res.error?.message ?? 'Could not open the demo')
+      setIsPending(false)
+      return
+    }
+    setAuth(res.data)
+    navigate(nextPath)
+  }
+
+  return (
+    <div className="auth-demo">
+      <div className="auth-divider">
+        <span>or</span>
+      </div>
+
+      {error && <div className="auth-error">{error}</div>}
+
+      <Button variant="secondary" size="lg" onClick={signIn} disabled={isPending}>
+        {isPending && <span className="spinner" />}
+        {isPending ? 'Opening the demo…' : 'Explore the demo'}
+      </Button>
+
+      <p className="auth-demo-note">
+        A shared, read-write account. Anything you save here is visible to other
+        visitors.
+      </p>
+    </div>
   )
 }

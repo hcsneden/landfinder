@@ -1,122 +1,122 @@
 import type {
   ApiResponse,
-  AuthTokens,
-  User,
-  SearchCriteria,
-  SearchJob,
+  AuthSession,
+  ConservationEasements,
+  EnvironmentalRisk,
+  GroundwaterInfo,
+  HuntingDistrict,
+  ListingStatus,
+  PaginatedResponse,
   Parcel,
   ParcelCandidates,
-  WaterRight,
-  Listing,
   ParcelInsight,
-  PaginatedResponse,
-  SavedParcel,
-  SearchResult,
-  HuntingDistrict,
-  StreamGauge,
   RoadAccess,
+  SavedParcel,
+  SearchCriteria,
+  SearchJob,
+  SearchResult,
+  SoilInfo,
+  StreamGauge,
   UtilityAccess,
-  EnvironmentalRisk,
-  ConservationEasement,
-  ListingStatus,
+  WaterRight,
 } from '@lastbestland/shared'
 import { useStore } from '../store'
 
-// SearchCriteria already includes bbox via shared types; alias for clarity at the call site
-export type WebSearchCriteria = SearchCriteria
-
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
-function getToken(): string | null {
-  try {
-    const stored = localStorage.getItem('lastbestland-session')
-    if (!stored) return null
-    const parsed = JSON.parse(stored) as { state?: { tokens?: AuthTokens } }
-    const tokens = parsed?.state?.tokens
-    return tokens?.idToken ?? tokens?.accessToken ?? null
-  } catch {
-    return null
+async function request(path: string, options: RequestInit = {}, token?: string | null): Promise<Response> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  return fetch(`${API_BASE_URL}${path}`, { ...options, headers })
+}
+
+async function toApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
+  if (response.ok) return response.json() as Promise<ApiResponse<T>>
+  const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } }
+  return {
+    success: false,
+    error: { code: String(response.status), message: body.error?.message ?? 'Request failed' },
   }
 }
 
-async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<ApiResponse<T>> {
-  const token = getToken()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> | undefined),
-  }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+// Only one refresh runs at a time so parallel 401s share it.
+let refreshInFlight: Promise<boolean> | null = null
 
+async function refreshSession(): Promise<boolean> {
+  const { tokens, setAuth, clearAuth } = useStore.getState()
+  if (!tokens) return false
+  refreshInFlight ??= (async () => {
+    const response = await request('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+    })
+    const result = await toApiResponse<AuthSession>(response)
+    if (result.success && result.data) {
+      setAuth(result.data)
+      return true
+    }
+    clearAuth()
+    return false
+  })().finally(() => {
+    refreshInFlight = null
+  })
+  return refreshInFlight
+}
+
+/**
+ * Calls the API with the current ID token. On a 401 it refreshes the session
+ * once and retries. If the refresh fails the session is cleared and the app
+ * returns to the sign-in page.
+ */
+async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers })
+    let response = await request(path, options, useStore.getState().tokens?.idToken)
+    if (response.status === 401 && (await refreshSession())) {
+      response = await request(path, options, useStore.getState().tokens?.idToken)
+    }
     if (response.status === 401) {
       useStore.getState().clearAuth()
-      window.location.replace('/auth')
       return { success: false, error: { code: '401', message: 'Session expired' } }
     }
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({})) as { error?: { message?: string }; message?: string }
-      return {
-        success: false,
-        error: { code: String(response.status), message: errorBody.error?.message ?? errorBody.message ?? 'Request failed' },
-      }
-    }
-    return response.json() as Promise<ApiResponse<T>>
+    return toApiResponse<T>(response)
   } catch {
-    return {
-      success: false,
-      error: { code: 'NETWORK_ERROR', message: 'Could not reach the server' },
-    }
+    return { success: false, error: { code: 'NETWORK_ERROR', message: 'Could not reach the server' } }
   }
 }
 
-export const authApi = {
-  login: (email: string, password: string) =>
-    apiFetch<{ tokens: AuthTokens; user: User }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
+const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
 
-  register: (email: string, password: string) =>
-    apiFetch<{ tokens: AuthTokens; user: User }>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
+export const authApi = {
+  login: (email: string, password: string) => apiFetch<AuthSession>('/auth/login', post({ email, password })),
+  register: (email: string, password: string) => apiFetch<AuthSession>('/auth/register', post({ email, password })),
 }
 
 export const searchApi = {
-  submitSearch: (criteria: WebSearchCriteria) =>
-    apiFetch<SearchJob>('/search', {
-      method: 'POST',
-      body: JSON.stringify(criteria),
-    }),
-
+  submitSearch: (criteria: SearchCriteria) => apiFetch<SearchJob>('/search', post(criteria)),
   getSearchResults: (jobId: string, page = 1, pageSize = 100) =>
-    apiFetch<PaginatedResponse<SearchResult>>(
-      `/search/${jobId}/results?page=${page}&pageSize=${pageSize}`
-    ),
+    apiFetch<PaginatedResponse<SearchResult>>(`/search/${jobId}/results?page=${page}&pageSize=${pageSize}`),
 }
+
+const parcelPath = (id: string, sub = '', refresh = false) =>
+  `/parcels/${id}${sub ? `/${sub}` : ''}${refresh ? '?refresh=true' : ''}`
 
 export const parcelApi = {
   lookupParcel: (q: string) => apiFetch<Parcel | ParcelCandidates>(`/parcels/lookup?q=${encodeURIComponent(q)}`),
-  getParcel: (id: string) => apiFetch<Parcel>(`/parcels/${id}`),
-  getWaterRights: (id: string) => apiFetch<WaterRight[]>(`/parcels/${id}/water-rights`),
-  getListings: (id: string) => apiFetch<Listing[]>(`/parcels/${id}/listings`),
-  getInsights: (id: string) => apiFetch<ParcelInsight[]>(`/parcels/${id}/insights`),
-  getHuntingDistricts: (id: string) => apiFetch<HuntingDistrict[]>(`/parcels/${id}/hunting-districts`),
-  getStreamGauges: (id: string) => apiFetch<StreamGauge[]>(`/parcels/${id}/stream-gauges`),
-  getRoadAccess: (id: string) => apiFetch<RoadAccess>(`/parcels/${id}/road-access`),
-  getUtilities: (id: string) => apiFetch<UtilityAccess>(`/parcels/${id}/utilities`),
-  getEnvironmentalRisk: (id: string) => apiFetch<EnvironmentalRisk>(`/parcels/${id}/environmental-risk`),
-  getConservationEasements: (id: string) => apiFetch<ConservationEasement[]>(`/parcels/${id}/conservation-easements`),
-  checkListingStatus: (id: string, opts?: { refresh?: boolean }) =>
-    apiFetch<ListingStatus>(`/parcels/${id}/listing-status${opts?.refresh ? '?refresh=true' : ''}`),
+  getParcel: (id: string) => apiFetch<Parcel>(parcelPath(id)),
+  getWaterRights: (id: string) => apiFetch<WaterRight[]>(parcelPath(id, 'water-rights')),
+  getInsights: (id: string) => apiFetch<ParcelInsight[]>(parcelPath(id, 'insights')),
+  getHuntingDistricts: (id: string) => apiFetch<HuntingDistrict[]>(parcelPath(id, 'hunting-districts')),
+  getStreamGauges: (id: string) => apiFetch<StreamGauge[]>(parcelPath(id, 'stream-gauges')),
+  getRoadAccess: (id: string) => apiFetch<RoadAccess>(parcelPath(id, 'road-access')),
+  getUtilities: (id: string) => apiFetch<UtilityAccess>(parcelPath(id, 'utilities')),
+  getEnvironmentalRisk: (id: string) => apiFetch<EnvironmentalRisk>(parcelPath(id, 'environmental-risk')),
+  getConservationEasements: (id: string) => apiFetch<ConservationEasements>(parcelPath(id, 'conservation-easements')),
+  getSoil: (id: string) => apiFetch<SoilInfo>(parcelPath(id, 'soil')),
+  getGroundwater: (id: string) => apiFetch<GroundwaterInfo>(parcelPath(id, 'groundwater')),
+  checkListingStatus: (id: string, refresh = false) => apiFetch<ListingStatus>(parcelPath(id, 'listing-status', refresh)),
 }
 
-// Aurora pauses after 10 idle minutes and takes about 20 seconds to come back.
+// Aurora pauses after 10 idle minutes and takes about 20 seconds to resume.
 // Calling this on load moves that wait off the user's first search.
 export const warmupApi = {
   wakeDatabase: () => apiFetch<{ ready: boolean; resumeMs: number }>('/warmup'),
@@ -124,11 +124,12 @@ export const warmupApi = {
 
 export const userApi = {
   getSavedParcels: () => apiFetch<SavedParcel[]>('/user/saved'),
-  saveParcel: (parcelId: string, notes?: string) =>
-    apiFetch<SavedParcel>(`/user/saved/${parcelId}`, {
-      method: 'POST',
-      body: JSON.stringify({ notes }),
-    }),
-  removeSavedParcel: (parcelId: string) =>
-    apiFetch<void>(`/user/saved/${parcelId}`, { method: 'DELETE' }),
+  saveParcel: (parcelId: string, notes?: string) => apiFetch<SavedParcel>(`/user/saved/${parcelId}`, post({ notes })),
+  removeSavedParcel: (parcelId: string) => apiFetch<void>(`/user/saved/${parcelId}`, { method: 'DELETE' }),
+}
+
+/** Unwraps a successful response or throws its error message, for use with react-query. */
+export function unwrap<T>(response: ApiResponse<T>): T {
+  if (!response.success || response.data === undefined) throw new Error(response.error?.message ?? 'Request failed')
+  return response.data
 }

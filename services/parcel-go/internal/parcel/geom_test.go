@@ -3,14 +3,14 @@ package parcel
 import "testing"
 
 func TestCentroid(t *testing.T) {
-	// A unit square centered at (0.5, 0.5) in lng/lat, plus the closing vertex.
+	// A unit square with the closing vertex repeated, as ArcGIS rings are.
 	rings := [][][]float64{{{0, 0}, {1, 0}, {1, 1}, {0, 1}, {0, 0}}}
 	got, ok := Centroid(rings)
 	if !ok {
 		t.Fatal("expected centroid")
 	}
-	if got.Lng < 0.39 || got.Lng > 0.41 || got.Lat < 0.39 || got.Lat > 0.41 {
-		t.Errorf("centroid = %+v, want ~{0.4, 0.4}", got)
+	if got.Lng < 0.499 || got.Lng > 0.501 || got.Lat < 0.499 || got.Lat > 0.501 {
+		t.Errorf("centroid = %+v, want {0.5, 0.5}", got)
 	}
 
 	if _, ok := Centroid(nil); ok {

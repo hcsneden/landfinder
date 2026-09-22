@@ -89,8 +89,8 @@ func TestIntegration_RoundTrip(t *testing.T) {
 		t.Fatal("expected coordinates")
 	}
 	if p.Coordinates.Lng < -110.96 || p.Coordinates.Lng > -110.94 ||
-		p.Coordinates.Lat < 45.03 || p.Coordinates.Lat > 45.05 {
-		t.Errorf("centroid = %+v, want ~{-110.95, 45.04}", p.Coordinates)
+		p.Coordinates.Lat < 45.04 || p.Coordinates.Lat > 45.06 {
+		t.Errorf("centroid = %+v, want ~{-110.95, 45.05}", p.Coordinates)
 	}
 
 	// Boundary round-tripped through ST_GeomFromGeoJSON / ST_AsGeoJSON.
