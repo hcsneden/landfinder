@@ -93,7 +93,8 @@ export const useStore = create<AppState>()(
         set({ searchResults: results, searchJobId: jobId, isSearching: false, searchError: null }),
       setLookedUpParcel: (parcel) =>
         set({
-          searchResults: [{ parcel, listing: null, hasWaterRights: false, previewInsight: null }],
+          // A direct lookup opens the detail sheet, which fetches listing status itself.
+          searchResults: [{ parcel, listing: null, hasWaterRights: false, previewInsight: null, listingStatus: null }],
           selectedParcelId: parcel.id,
           isDetailOpen: true,
           isSearching: false,

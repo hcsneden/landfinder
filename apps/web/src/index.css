@@ -359,6 +359,14 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   border-color: var(--border-dark);
 }
 
+/* Listed for sale. An outline rather than a fill so it reads on top of any score
+   color, and outline is untouched by the hover/selected box-shadow rules below.
+   Never color alone: the pin reads "For sale" when no price is known. */
+.marker-pin.for-sale {
+  outline: 2px solid var(--pine-mid);
+  outline-offset: 1.5px;
+}
+
 .marker-stem {
   width: 1.5px;
   height: 7px;
@@ -1500,6 +1508,46 @@ button { cursor: pointer; border: none; background: none; font: inherit; }
   border-radius: var(--radius);
   font-size: 12px;
   color: var(--danger);
+}
+
+/* ─── Demo sign-in ───────────────────────────────────────────────────────── */
+
+.auth-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.auth-demo .dl-button {
+  width: 100%;
+  justify-content: center;
+}
+
+/* "or" rule between the sign-in form and the demo button */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-4);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-demo-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-4);
+  text-align: center;
 }
 
 .auth-switch {

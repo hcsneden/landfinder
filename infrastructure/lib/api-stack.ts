@@ -58,8 +58,8 @@ export class ApiStack extends cdk.Stack {
 
     const searchJobsQueue = new sqs.Queue(this, 'SearchJobsQueue', {
       queueName: 'landfinder-search-jobs',
-      // Visibility timeout must exceed the worker Lambda timeout (60s) to prevent duplicate processing
-      visibilityTimeout: cdk.Duration.seconds(90),
+      // Visibility timeout must exceed the worker Lambda timeout (120s) to prevent duplicate processing
+      visibilityTimeout: cdk.Duration.seconds(150),
       retentionPeriod: cdk.Duration.days(7),
       deadLetterQueue: {
         queue: searchJobsDlq,
@@ -148,10 +148,15 @@ export class ApiStack extends cdk.Stack {
       entry: path.join(__dirname, '../../services/api/search/worker.ts'),
       handler: 'handler',
       memorySize: 512,
-      timeout: cdk.Duration.seconds(60),
+      // 120s rather than 60s: after the PostGIS query the worker resolves for-sale
+      // status for the result set, which runs up to 15 uncached web search + Bedrock
+      // checks five at a time. Cached result sets still finish in about a second.
+      timeout: cdk.Duration.seconds(120),
       environment: {
         ...commonEnv,
         SEARCHES_TABLE: searchesTable.tableName,
+        SERPER_SECRET_ARN: serperSecret.secretArn,
+        BEDROCK_MODEL_ID: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
       },
     });
 
@@ -240,6 +245,8 @@ export class ApiStack extends cdk.Stack {
 
     serperSecret.grantRead(parcelFn);
     serperSecret.grantRead(parcelLookupFn);
+    // The worker resolves for-sale status for each result set.
+    serperSecret.grantRead(searchWorkerFn);
 
     searchesTable.grantReadWriteData(searchFn);
     searchesTable.grantReadWriteData(searchWorkerFn);
@@ -258,6 +265,8 @@ export class ApiStack extends cdk.Stack {
     parcelFn.addToRolePolicy(bedrockInvokePolicy);
     // Also needed for the listing-status check on ambiguous (multi-candidate) lookups
     parcelLookupFn.addToRolePolicy(bedrockInvokePolicy);
+    // And for the same check across a search result set
+    searchWorkerFn.addToRolePolicy(bedrockInvokePolicy);
 
     usersTable.grantReadWriteData(authLoginFn);
     usersTable.grantReadWriteData(authRegisterFn);

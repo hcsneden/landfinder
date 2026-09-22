@@ -213,14 +213,22 @@ export function MapView() {
       const { longitude, latitude } = coordinates
       foundAnyCoordinates = true
 
-      const price = result.listing?.price
+      // No listing feed, so the price on the pin usually comes from the per-parcel
+      // for-sale check rather than from a listing row.
+      const price = result.listing?.price ?? result.listingStatus?.price ?? null
+      const isForSale = result.listingStatus?.forSale ?? false
 
       const markerElement = document.createElement('div')
       markerElement.className = 'map-marker'
 
       const pinElement = document.createElement('div')
-      pinElement.className = `marker-pin ${getMarkerScoreClass(result)}`
-      pinElement.textContent = price ? formatCompactPrice(price) : '—'
+      pinElement.className = `marker-pin ${getMarkerScoreClass(result)}${isForSale ? ' for-sale' : ''}`
+      pinElement.textContent = price ? formatCompactPrice(price) : isForSale ? 'For sale' : '—'
+      if (isForSale) {
+        pinElement.title = result.listingStatus?.source
+          ? `Listed on ${result.listingStatus.source}`
+          : 'Listed for sale'
+      }
 
       const stemElement = document.createElement('div')
       stemElement.className = 'marker-stem'

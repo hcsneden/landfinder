@@ -2,6 +2,7 @@ import type { SQSEvent, SQSBatchResponse, Context } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { query } from '../shared/db';
+import { getListingStatusesForParcels } from '../shared/listingStatus';
 import { logger } from '../shared/logger';
 import { metrics, MetricUnit } from '../shared/metrics';
 import { tracer } from '../shared/tracer';
@@ -174,8 +175,72 @@ async function executeSearch(criteria: SearchCriteria): Promise<SearchResult[]> 
         }
       : null;
 
-    return { parcel, listing, hasWaterRights: row.has_water_rights, previewInsight: row.preview_insight };
+    return {
+      parcel,
+      listing,
+      hasWaterRights: row.has_water_rights,
+      previewInsight: row.preview_insight,
+      listingStatus: null,
+    };
   });
+}
+
+/**
+ * Attach the for-sale signal to a result set.
+ *
+ * There is no listing feed, so this is what puts a price and a "for sale" badge on
+ * the map. Cached statuses cover the whole set; uncached ones are checked live up to
+ * an internal cap, so a result set warms the cache for the next search over the same
+ * ground. Runs in the worker rather than the API handler because the live checks are
+ * web search plus Bedrock and would not fit inside the API Gateway timeout.
+ */
+async function attachListingStatus(results: SearchResult[]): Promise<SearchResult[]> {
+  if (results.length === 0) return results;
+
+  try {
+    const statuses = await getListingStatusesForParcels(
+      results.map((r) => ({
+        parcelNumber: r.parcel.parcelNumber,
+        address: r.parcel.address,
+      }))
+    );
+
+    let forSaleCount = 0;
+
+    const withStatus = results.map((r) => {
+      const status = r.parcel.parcelNumber ? statuses.get(r.parcel.parcelNumber) : undefined;
+      if (!status) return r;
+      if (status.forSale) forSaleCount++;
+
+      return {
+        ...r,
+        listingStatus: {
+          forSale: status.forSale,
+          confidence: status.confidence,
+          price: status.price,
+          listingUrl: status.listingUrl,
+          source: status.source,
+        },
+      };
+    });
+
+    metrics.addMetric('SearchListingStatusResolved', MetricUnit.Count, statuses.size);
+    metrics.addMetric('SearchResultsForSale', MetricUnit.Count, forSaleCount);
+
+    // Parcels that are actually for sale lead, without dropping the rest: a buyer
+    // researching a specific area still wants the parcels that are not listed.
+    return [
+      ...withStatus.filter((r) => r.listingStatus?.forSale),
+      ...withStatus.filter((r) => !r.listingStatus?.forSale),
+    ];
+  } catch (err) {
+    // A search with no for-sale badges is worth more than a failed search.
+    logger.warn('Listing status enrichment failed, returning results unenriched', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    metrics.addMetric('SearchListingStatusFailed', MetricUnit.Count, 1);
+    return results;
+  }
 }
 
 async function processSearchJob(messageBody: string): Promise<void> {
@@ -196,7 +261,7 @@ async function processSearchJob(messageBody: string): Promise<void> {
   );
 
   const start = Date.now();
-  const results = await executeSearch(criteria);
+  const results = await attachListingStatus(await executeSearch(criteria));
   const durationMs = Date.now() - start;
 
   await docClient.send(

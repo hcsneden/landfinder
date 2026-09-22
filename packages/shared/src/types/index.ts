@@ -179,6 +179,20 @@ export interface SearchResult {
   listing: Listing | null;
   hasWaterRights: boolean;
   previewInsight: string | null;
+  // For-sale signal derived per parcel rather than from an aggregated listing feed.
+  // Null means not yet checked, which is not the same as not for sale: the search
+  // worker only checks a bounded number of uncached parcels per run.
+  listingStatus: SearchListingStatus | null;
+}
+
+// The parts of ListingStatus worth carrying in a result set. The full record,
+// including the summary text, comes from GET /parcels/{id}/listing-status.
+export interface SearchListingStatus {
+  forSale: boolean;
+  confidence: ListingStatusConfidence;
+  price: number | null;
+  listingUrl: string | null;
+  source: string | null;
 }
 
 export interface SearchJob {

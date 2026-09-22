@@ -141,31 +141,10 @@ export class ScrapingStack extends cdk.Stack {
       },
     });
 
-    // Listings Scraper Task Definition (stub — no active source configured)
-    const listingsTaskDef = new ecs.FargateTaskDefinition(
-      this,
-      'ListingsScraperTask',
-      {
-        family: 'landfinder-listings-scraper',
-        memoryLimitMiB: 512,
-        cpu: 256,
-        executionRole: executionRole,
-        taskRole: taskRole,
-      }
-    );
-
-    listingsTaskDef.addContainer('ListingsScraper', {
-      containerName: 'listings-scraper',
-      image: ecs.ContainerImage.fromEcrRepository(scraperRepo, 'listings-latest'),
-      logging: ecs.LogDrivers.awsLogs({
-        streamPrefix: 'listings-scraper',
-      }),
-      environment: {
-        DATABASE_SECRET_ARN: database.secret!.secretArn,
-        S3_BUCKET: this.scrapingBucket.bucketName,
-        AWS_REGION: cdk.Aws.REGION,
-      },
-    });
+    // No listings scraper. Aggregating listing feeds needs a licensed MLS or partner
+    // feed we do not have, so for-sale status comes from the per-parcel check in
+    // services/api/shared/listingStatus.ts instead. The `listings` table stays for a
+    // future licensed feed; nothing writes to it today.
 
     // Hunting Districts Scraper Task Definition (run weekly — districts rarely change)
     const huntingDistrictsTaskDef = new ecs.FargateTaskDefinition(
@@ -243,16 +222,6 @@ export class ScrapingStack extends cdk.Stack {
       }
     );
 
-    const runListingsScraper = new sfn_tasks.EcsRunTask(this, 'RunListingsScraper', {
-      integrationPattern: stepfunctions.IntegrationPattern.RUN_JOB,
-      cluster: this.cluster,
-      taskDefinition: listingsTaskDef,
-      launchTarget: new sfn_tasks.EcsFargateLaunchTarget(),
-      // Public subnet with a public IP instead of a NAT. No inbound rules, so nothing can reach the task.
-      subnets: { subnetType: ec2.SubnetType.PUBLIC },
-      assignPublicIp: true,
-    });
-
     const runHuntingDistrictsScraper = new sfn_tasks.EcsRunTask(this, 'RunHuntingDistrictsScraper', {
       integrationPattern: stepfunctions.IntegrationPattern.RUN_JOB,
       cluster: this.cluster,
@@ -280,7 +249,6 @@ export class ScrapingStack extends cdk.Stack {
 
     parallelScrapers.branch(runCadastralScraper);
     parallelScrapers.branch(runWaterRightsScraper);
-    parallelScrapers.branch(runListingsScraper);
     parallelScrapers.branch(runHuntingDistrictsScraper);
     parallelScrapers.branch(runStreamGaugesScraper);
 
