@@ -4,7 +4,7 @@ import { query, execute } from '../shared/db';
 import { success, badRequest, serverError, error as errorResponse } from '../shared/response';
 import { getOrCheckListingStatus } from '../shared/listingStatus';
 import { logger } from '../shared/logger';
-import type { Parcel, ParcelCandidate } from '@landfinder/shared';
+import type { Parcel, ParcelCandidate } from '@lastbestland/shared';
 
 const CADASTRAL_URL =
   'https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1/query';
@@ -762,6 +762,11 @@ export async function handler(
     if (!rawQ || rawQ.length < 3) {
       return badRequest('Query parameter "q" is required (minimum 3 characters)');
     }
+
+    // Start a paused Aurora resuming now, in parallel with the Cadastral calls below,
+    // instead of paying the full resume when the first upsert runs. Fire and forget:
+    // the upsert has its own resume retries if this has not finished by then.
+    void query('SELECT 1').catch(() => undefined);
 
     const lotRewrite = rewriteLotNumberAsHouseNumber(rawQ);
     const q = lotRewrite ?? rawQ;

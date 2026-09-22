@@ -1,4 +1,4 @@
-// Core data types for LandFinder
+// Core data types for Last Best Land
 
 export interface BBox {
   minLng: number;
@@ -261,6 +261,10 @@ export interface UtilityAccess {
   parcelId: string;
   electric: ElectricAccess | null;
   broadband: BroadbandProvider[];
+  // False when no broadband source is wired up, so the UI can say "no data" rather
+  // than "no providers". The FCC's public point lookup was retired and its
+  // replacement is a credentialed bulk download, so this is false for now.
+  broadbandDataAvailable: boolean;
   fetchedAt: string;
 }
 
@@ -324,11 +328,14 @@ export interface FloodZone {
 
 export type WildfireRiskRating = 'Very High' | 'High' | 'Medium' | 'Low' | 'Very Low';
 
+// Fields follow the USGS hosted MRDS "compact" service, which is all that survived
+// the retirement of the mrdata.usgs.gov ArcGIS REST endpoint. Deposit, work and
+// operation type are not published by any live MRDS query service any more.
 export interface MineSite {
   name: string | null;
-  depositType: string | null;
-  workType: string | null;
-  operType: string | null;
+  devStatus: string | null;
+  commodities: string | null;
+  url: string | null;
 }
 
 export interface EnvironmentalRisk {

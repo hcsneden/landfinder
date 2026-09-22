@@ -1,6 +1,6 @@
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { upsertParcel, closePool } from '../shared/db';
-import { MONTANA_COUNTIES } from '@landfinder/shared';
+import { MONTANA_COUNTIES } from '@lastbestland/shared';
 
 const CADASTRAL_BASE_URL = 'https://gis.dnrc.mt.gov/arcgis/rest/services';
 const PARCEL_SERVICE = '/Cadastral/Cadastral_Parcels/MapServer/0';
@@ -45,7 +45,7 @@ async function fetchWithTimeout(url: string): Promise<Response> {
   try {
     return await fetch(url, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'LandFinder/1.0 (Property Research Tool)' },
+      headers: { 'User-Agent': 'LastBestLand/1.0 (Property Research Tool)' },
     });
   } finally {
     clearTimeout(timer);

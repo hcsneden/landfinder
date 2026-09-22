@@ -2,8 +2,8 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } fr
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { userApi, parcelApi } from '../../services/api';
-import { formatAcreage, formatDate } from '@landfinder/shared';
-import type { SavedParcel, Parcel } from '@landfinder/shared';
+import { formatAcreage, formatDate } from '@lastbestland/shared';
+import type { SavedParcel, Parcel } from '@lastbestland/shared';
 
 interface SavedParcelWithDetails extends SavedParcel {
   parcelDetails?: Parcel;

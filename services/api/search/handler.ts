@@ -7,7 +7,7 @@ import { logger } from '../shared/logger';
 import { metrics, MetricUnit } from '../shared/metrics';
 import { tracer } from '../shared/tracer';
 import { getUserIdFromEvent } from '../shared/auth';
-import type { SearchCriteria, SearchJob } from '@landfinder/shared';
+import type { SearchCriteria, SearchJob } from '@lastbestland/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const dynamoClient = tracer.captureAWSv3Client(new DynamoDBClient({}));

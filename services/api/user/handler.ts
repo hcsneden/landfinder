@@ -7,7 +7,7 @@ import { logger } from '../shared/logger';
 import { metrics, MetricUnit } from '../shared/metrics';
 import { tracer } from '../shared/tracer';
 import { getUserIdFromEvent } from '../shared/auth';
-import type { SavedParcel, SearchJob } from '@landfinder/shared';
+import type { SavedParcel, SearchJob } from '@lastbestland/shared';
 
 const SEARCHES_TABLE = process.env.SEARCHES_TABLE;
 if (!SEARCHES_TABLE) throw new Error('SEARCHES_TABLE environment variable not set');

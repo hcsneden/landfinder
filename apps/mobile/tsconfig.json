@@ -3,8 +3,8 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@landfinder/shared": ["../../packages/shared/src"],
-      "@landfinder/shared/*": ["../../packages/shared/src/*"]
+      "@lastbestland/shared": ["../../packages/shared/src"],
+      "@lastbestland/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": [

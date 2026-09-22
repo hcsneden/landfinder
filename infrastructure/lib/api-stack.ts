@@ -202,8 +202,10 @@ export class ApiStack extends cdk.Stack {
     });
     database.grantDataApiAccess(migrationFn);
 
-    // Aurora pauses when idle and resumes in ~15s, but 30s+ after a day paused, which
-    // would exceed API Gateway's timeout. A ping every 12 hours keeps it out of deep sleep.
+    // Aurora pauses after 10 idle minutes and resumes in ~20s, longer after a day paused,
+    // which would exceed API Gateway's timeout. A ping every 12 hours keeps it out of deep
+    // sleep, and the web app calls GET /warmup on load so the resume overlaps with the user
+    // reading the map instead of landing inside their first search.
     const dbWarmupFn = new lambdaNode.NodejsFunction(this, 'DbWarmupFunction', {
       ...lambdaDefaults,
       functionName: 'landfinder-db-warmup',
@@ -335,6 +337,12 @@ export class ApiStack extends cdk.Stack {
     parcelByIdResource.addResource('listing-status').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
     parcelByIdResource.addResource('soil').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
     parcelByIdResource.addResource('groundwater').addMethod('GET', new apigateway.LambdaIntegration(parcelFn), authOptions);
+
+    // Wakes a paused Aurora cluster ahead of the first real query. Authorized so it
+    // cannot be used anonymously to hold the cluster awake.
+    this.api.root
+      .addResource('warmup')
+      .addMethod('GET', new apigateway.LambdaIntegration(dbWarmupFn), authOptions);
 
     const userResource = this.api.root.addResource('user');
     const savedResource = userResource.addResource('saved');

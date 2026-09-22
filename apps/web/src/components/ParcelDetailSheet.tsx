@@ -14,8 +14,8 @@ import {
   formatPrice,
   formatPricePerAcre,
   getListingSourceLabel,
-} from '@landfinder/shared'
-import type { WaterRight, Listing, ParcelInsight, HuntingDistrict, StreamGauge, RoadAccess, RoadSegment, UtilityAccess, BroadbandProvider, EnvironmentalRisk, FloodZone, WildfireRiskRating, MineSite, ConservationEasement, ListingStatus } from '@landfinder/shared'
+} from '@lastbestland/shared'
+import type { WaterRight, Listing, ParcelInsight, HuntingDistrict, StreamGauge, RoadAccess, RoadSegment, UtilityAccess, BroadbandProvider, EnvironmentalRisk, FloodZone, WildfireRiskRating, MineSite, ConservationEasement, ListingStatus } from '@lastbestland/shared'
 
 function unwrap<T>(r: { success: boolean; data?: T; error?: { message?: string } }): T {
   if (!r.success || !r.data) throw new Error(r.error?.message)
@@ -403,7 +403,7 @@ export function ParcelDetailSheet() {
         <div style={{ padding: '16px 20px' }}>
           <Typography variant="caption" muted>
             Data sourced from Montana DNRC, Montana Cadastral, and public listing aggregators.
-            LandFinder does not guarantee accuracy. Verify water rights, access, and encumbrances
+            Last Best Land does not guarantee accuracy. Verify water rights, access, and encumbrances
             through county records and a licensed real estate attorney before purchase.
           </Typography>
         </div>
@@ -511,10 +511,12 @@ function ParcelRating({
   }
   if (p.broadband) {
     const providers = utilities?.broadband ?? []
+    // No source since the FCC retired its public lookup, so this cannot be judged met or unmet.
+    const dataAvailable = utilities?.broadbandDataAvailable ?? false
     items.push({
       key: 'broadband', label: 'Broadband',
-      met: loading ? null : providers.length > 0,
-      note: loading ? '' : providers.length > 0
+      met: loading || !dataAvailable ? null : providers.length > 0,
+      note: loading ? '' : !dataAvailable ? 'No data source' : providers.length > 0
         ? providers[0]!.techType + (providers.length > 1 ? ` +${providers.length - 1}` : '')
         : 'No providers reported',
     })
@@ -1055,7 +1057,12 @@ function UtilityAccessSection({ access }: { access: UtilityAccess }) {
       {/* Broadband */}
       <div className="utility-subsection" style={{ marginTop: 14 }}>
         <div className="utility-subsection-label">Broadband Availability</div>
-        {sortedBroadband.length === 0 ? (
+        {!access.broadbandDataAvailable ? (
+          <div className="road-access-banner road-access-warn">
+            <span className="road-access-icon">!</span>
+            Broadband availability is unavailable — the FCC retired the public lookup this used
+          </div>
+        ) : sortedBroadband.length === 0 ? (
           <div className="road-access-banner road-access-warn">
             <span className="road-access-icon">!</span>
             No broadband providers reported at this location
@@ -1067,9 +1074,11 @@ function UtilityAccessSection({ access }: { access: UtilityAccess }) {
             ))}
           </div>
         )}
-        <div className="road-access-note">
-          FCC broadband data reflects provider filings and may not match actual service at this address.
-        </div>
+        {access.broadbandDataAvailable && (
+          <div className="road-access-note">
+            FCC broadband data reflects provider filings and may not match actual service at this address.
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1225,16 +1234,16 @@ function EnvironmentalRiskSection({ risk }: { risk: EnvironmentalRisk }) {
 }
 
 function MineSiteRow({ mine }: { mine: MineSite }) {
-  const label = mine.workType ?? mine.operType ?? 'Mine Site'
+  const label = mine.devStatus ?? 'Mine Site'
   return (
     <div className="road-item">
       <div className="road-item-left">
         <span className="road-type-pill road-type-rough">{label}</span>
         <span className="road-item-name">{mine.name ?? 'Unnamed Site'}</span>
       </div>
-      {mine.depositType && (
+      {mine.commodities && (
         <div className="road-item-right">
-          <span className="road-source">{mine.depositType}</span>
+          <span className="road-source">{mine.commodities}</span>
         </div>
       )}
     </div>

@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { SearchResult, AuthTokens, User, Parcel, ParcelCandidate, GeoJSONPolygon, BBox } from '@landfinder/shared'
+import type { SearchResult, AuthTokens, User, Parcel, ParcelCandidate, GeoJSONPolygon, BBox } from '@lastbestland/shared'
 
-export type { BBox } from '@landfinder/shared'
+export type { BBox } from '@lastbestland/shared'
 
 const MAX_RECENT_SEARCHES = 8
 
@@ -158,7 +158,7 @@ export const useStore = create<AppState>()(
         set((state) => ({ preferences: { ...state.preferences, ...prefs } })),
     }),
     {
-      name: 'landfinder-session',
+      name: 'lastbestland-session',
       partialize: (state) => ({
         user: state.user,
         tokens: state.tokens,

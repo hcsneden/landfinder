@@ -16,7 +16,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@landfinder/shared": ["../../packages/shared/src/index.ts"]
+      "@lastbestland/shared": ["../../packages/shared/src/index.ts"]
     }
   },
   "include": ["src"],

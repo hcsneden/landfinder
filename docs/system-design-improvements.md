@@ -41,7 +41,7 @@ Research drawn from interviewing.io, Hello Interview, Design Gurus, Exponent, Pr
 
 ---
 
-## What LandFinder Already Demonstrates Well
+## What Last Best Land Already Demonstrates Well
 
 These are genuine strengths — articulate them explicitly in interviews.
 

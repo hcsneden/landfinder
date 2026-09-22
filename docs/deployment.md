@@ -1,4 +1,4 @@
-# Deploying LandFinder to AWS
+# Deploying Last Best Land to AWS
 
 ## Prerequisites
 

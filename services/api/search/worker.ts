@@ -5,7 +5,7 @@ import { query } from '../shared/db';
 import { logger } from '../shared/logger';
 import { metrics, MetricUnit } from '../shared/metrics';
 import { tracer } from '../shared/tracer';
-import type { SearchCriteria, SearchResult, Parcel, Listing } from '@landfinder/shared';
+import type { SearchCriteria, SearchResult, Parcel, Listing } from '@lastbestland/shared';
 
 const dynamoClient = tracer.captureAWSv3Client(new DynamoDBClient({}));
 const docClient = DynamoDBDocumentClient.from(dynamoClient);

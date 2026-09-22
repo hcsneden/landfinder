@@ -1,6 +1,6 @@
 # parcel-go
 
-A Go port of LandFinder's parcel-lookup service — a geospatial backend that
+A Go port of Last Best Land's parcel-lookup service — a geospatial backend that
 resolves a free-text address or parcel ID to a Montana cadastral parcel,
 persists it to PostgreSQL/PostGIS, and seeds the parcel's DNRC water rights.
 

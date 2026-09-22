@@ -18,8 +18,8 @@ import {
   MONTANA_COUNTIES,
   formatAcreage,
   formatPrice,
-} from '@landfinder/shared';
-import type { SearchCriteria, SearchResult } from '@landfinder/shared';
+} from '@lastbestland/shared';
+import type { SearchCriteria, SearchResult } from '@lastbestland/shared';
 
 function SearchFilters({
   criteria,

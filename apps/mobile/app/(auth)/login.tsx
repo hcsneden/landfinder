@@ -42,7 +42,7 @@ export default function LoginScreen() {
     >
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title}>LandFinder</Text>
+          <Text style={styles.title}>Last Best Land</Text>
           <Text style={styles.subtitle}>Find your perfect piece of land</Text>
         </View>
 

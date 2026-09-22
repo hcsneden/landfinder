@@ -10,7 +10,7 @@ import { success, badRequest, unauthorized, serverError } from '../shared/respon
 import { logger } from '../shared/logger';
 import { metrics, MetricUnit } from '../shared/metrics';
 import { tracer } from '../shared/tracer';
-import type { AuthTokens, User, LoginRequest } from '@landfinder/shared';
+import type { AuthTokens, User, LoginRequest } from '@lastbestland/shared';
 
 const USER_POOL_ID = process.env.USER_POOL_ID;
 if (!USER_POOL_ID) throw new Error('USER_POOL_ID environment variable not set');

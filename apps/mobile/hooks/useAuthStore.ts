@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
-import type { AuthTokens, User } from '@landfinder/shared';
+import type { AuthTokens, User } from '@lastbestland/shared';
 import { authApi } from '../services/api';
 
 interface AuthState {
@@ -14,8 +14,8 @@ interface AuthState {
   logout: () => Promise<void>;
 }
 
-const TOKEN_KEY = 'landfinder_tokens';
-const USER_KEY = 'landfinder_user';
+const TOKEN_KEY = 'lastbestland_tokens';
+const USER_KEY = 'lastbestland_user';
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,

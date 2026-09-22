@@ -4,8 +4,8 @@ import { Button, Input } from '@hcsneden/design-library'
 import { useStore } from '../store'
 import type { Preferences } from '../store'
 import { parcelApi } from '../services/api'
-import { formatAcreage } from '@landfinder/shared'
-import type { ParcelCandidate } from '@landfinder/shared'
+import { formatAcreage } from '@lastbestland/shared'
+import type { ParcelCandidate } from '@lastbestland/shared'
 import { SavedPanel } from './SavedPanel'
 
 const LOOKUP_STATUS_LABELS = [

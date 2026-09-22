@@ -13,12 +13,12 @@ import type {
   ParcelInsight,
   PaginatedResponse,
   SavedParcel,
-} from '@landfinder/shared';
+} from '@lastbestland/shared';
 
 // TODO: Update with actual API Gateway URL after deployment
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
-const TOKEN_KEY = 'landfinder_tokens';
+const TOKEN_KEY = 'lastbestland_tokens';
 
 const createApiClient = (): AxiosInstance => {
   const client = axios.create({

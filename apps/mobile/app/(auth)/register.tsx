@@ -70,7 +70,7 @@ export default function RegisterScreen() {
           <View style={styles.header}>
             <Text style={styles.title}>Create Account</Text>
             <Text style={styles.subtitle}>
-              Join LandFinder to discover your perfect property
+              Join Last Best Land to discover your perfect property
             </Text>
           </View>
 

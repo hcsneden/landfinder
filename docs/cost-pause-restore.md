@@ -18,13 +18,23 @@ redeployed without a NAT at all:
   explicit `::uuid` cast, and arrays are sent as text with a `::type[]` cast.
 - The scraper tasks run in public subnets with a public IP and no inbound rules,
   and still connect to Aurora with `pg` from inside the VPC.
-- RDS `landfinder-db` was stopped, not deleted. A follow-up deploy removes it
-  (final snapshot), the legacy exports in `database-stack.ts`, the old `Private`
-  subnets and the unused Lambda security group. Do it within 7 days of stopping,
-  or AWS restarts the instance and billing resumes.
+- RDS `landfinder-db` is gone as of 2026-09-15, deleted by the cleanup deploy
+  along with the legacy exports and its Secrets Manager credentials. Its final
+  snapshot is
+  `landfinderdatabasestack-snapshot-landfinderdatabasea23662a9-6ogylqxwanky`,
+  alongside the manual `landfinder-db-pre-aurora-20260915` the Aurora cluster was
+  restored from. Deleting it needed the instance started first and deletion
+  protection turned off: CloudFormation cannot modify or delete a stopped
+  instance, and a failed rollback leaves the stack in `UPDATE_ROLLBACK_FAILED`.
+- Still to remove: the old `Private` subnets (kept because dropping them from
+  `subnetConfiguration` would renumber the CIDRs of the `Isolated` subnets Aurora
+  sits in) and the unused Lambda security group in `api-stack.ts`, which four
+  detached Lambda network interfaces still reference.
 - Deploys need `ALLOWED_ORIGINS` set, or API Gateway CORS falls back to
   localhost and the CloudFront site cannot call the API:
   `ALLOWED_ORIGINS=https://d3fq5dh8c0d57s.cloudfront.net,http://localhost:5173`.
+  `./deploy.sh` sets it from the `LandFinderWebStack` `WebUrl` output when it is
+  not already in the environment. Raw `npx cdk deploy` does not.
 
 ## Summary
 

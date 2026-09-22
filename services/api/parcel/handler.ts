@@ -7,7 +7,7 @@ import { getSoilInfo } from '../shared/soil';
 import { getGroundwater } from '../shared/groundwater';
 import { logger } from '../shared/logger';
 import { metrics, MetricUnit } from '../shared/metrics';
-import type { Parcel, WaterRight, Listing, ParcelInsight, HuntingDistrict, StreamGauge, StreamGaugeReading, RoadSegment, RoadAccess, RoadType, UtilityAccess, ElectricAccess, BroadbandProvider, EnvironmentalRisk, FloodZone, FloodRiskLevel, WildfireRiskRating, MineSite, ConservationEasement, ListingStatus } from '@landfinder/shared';
+import type { Parcel, WaterRight, Listing, ParcelInsight, HuntingDistrict, StreamGauge, StreamGaugeReading, RoadSegment, RoadAccess, RoadType, UtilityAccess, ElectricAccess, BroadbandProvider, EnvironmentalRisk, FloodZone, FloodRiskLevel, WildfireRiskRating, MineSite, ConservationEasement, ListingStatus } from '@lastbestland/shared';
 
 interface ParcelRow {
   id: string;
@@ -475,12 +475,24 @@ function normalizeSurface(raw: unknown): string | null {
   return raw.trim();
 }
 
+// POST the parameters as a form body rather than a query string. A buffered parcel
+// boundary can serialize to tens of KB of geometry, which overruns the URI limit on
+// some hosts: FEMA returns 414 past ~12KB and drops the connection past ~50KB, which
+// surfaces as an opaque "TypeError: fetch failed". ArcGIS /query accepts POST natively.
 async function fetchArcGis(url: string, params: URLSearchParams): Promise<ArcGisFeatureResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ROAD_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${url}?${params}`, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} ${body.slice(0, 200)}`.trim());
+    }
     return await res.json() as ArcGisFeatureResult;
   } finally {
     clearTimeout(timer);
@@ -555,14 +567,16 @@ async function queryUsfsRoads(geomStr: string): Promise<RoadSegment[]> {
     spatialRel: 'esriSpatialRelIntersects',
     inSR: '4326',
     outFields: 'NAME,OPER_MAINT_LEVEL,SURFACE_TYPE',
-    resultRecordCount: '30',
+    // No resultRecordCount. On this 585k-feature layer it forces the pagination path,
+    // which takes 3.5s at best and has been seen past 30s, blowing the 12s timeout.
+    // Without it the same query returns in about 0.3s. The cap is applied below.
     returnGeometry: 'false',
     f: 'json',
   });
 
   const data = await fetchArcGis(USFS_URL, params);
 
-  return (data.features ?? []).map((f) => {
+  return (data.features ?? []).slice(0, 30).map((f) => {
     const level = typeof f.attributes.OPER_MAINT_LEVEL === 'number'
       ? f.attributes.OPER_MAINT_LEVEL as number
       : parseInt(String(f.attributes.OPER_MAINT_LEVEL ?? ''), 10) || null;
@@ -699,77 +713,15 @@ const HIFLD_TRANSMISSION_URL =
   'https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Electric_Power_Transmission_Lines/FeatureServer/0/query';
 const HIFLD_SERVICE_TERRITORY_URL =
   'https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Electric_Retail_Service_Territories/FeatureServer/0/query';
-const FCC_BROADBAND_URL = 'https://broadbandmap.fcc.gov/api/public/map/listAvailability';
+// The FCC's public point-in-radius broadband lookup (listAvailability) was retired:
+// every request now returns the API's 405 "Method Not Available" catch-all. The
+// surviving BDC API is a credentialed bulk download of block-level CSVs, which would
+// mean ingesting and joining that data rather than a per-parcel call. Until then the
+// API reports broadband as unavailable instead of as "no providers".
+const BROADBAND_DATA_AVAILABLE = false;
+
 const ELECTRIC_SEARCH_RADIUS_METERS = 16_093; // 10 miles
 const UTILITY_FETCH_TIMEOUT_MS = 12_000;
-
-const TECH_CODE_LABELS: Record<number, string> = {
-  10: 'DSL',
-  11: 'DSL',
-  12: 'DSL',
-  20: 'Cable',
-  30: 'Cable',
-  40: 'Cable',
-  50: 'Fiber',
-  60: 'Satellite',
-  70: 'Satellite',
-  300: 'Fixed Wireless',
-  400: 'Fixed Wireless',
-  0: 'Other',
-};
-
-interface FccAvailabilityResponse {
-  availability?: Array<{
-    brand_name?: string;
-    doing_business_as?: string;
-    frn?: string;
-    technology?: number;
-    max_advertised_download_speed?: number;
-    max_advertised_upload_speed?: number;
-  }>;
-}
-
-async function fetchFccBroadband(lat: number, lon: number): Promise<BroadbandProvider[]> {
-  const params = new URLSearchParams({
-    latitude: lat.toFixed(6),
-    longitude: lon.toFixed(6),
-    unit: '1',
-    radius: '0.5',
-  });
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UTILITY_FETCH_TIMEOUT_MS);
-
-  try {
-    const res = await fetch(`${FCC_BROADBAND_URL}?${params}`, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) throw new Error(`FCC BDC HTTP ${res.status}`);
-
-    const data = await res.json() as FccAvailabilityResponse;
-    const seen = new Set<string>();
-    const providers: BroadbandProvider[] = [];
-
-    for (const entry of data.availability ?? []) {
-      const name = entry.brand_name ?? entry.doing_business_as ?? 'Unknown Provider';
-      const tech = entry.technology ?? 0;
-      const key = `${name}:${tech}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      providers.push({
-        providerName: name,
-        techType: TECH_CODE_LABELS[tech] ?? 'Other',
-        maxDownloadSpeed: entry.max_advertised_download_speed ?? null,
-        maxUploadSpeed: entry.max_advertised_upload_speed ?? null,
-      });
-    }
-
-    return providers.sort((a, b) => (b.maxDownloadSpeed ?? 0) - (a.maxDownloadSpeed ?? 0));
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 async function fetchHifldElectricLines(arcGisGeomStr: string): Promise<ElectricAccess> {
   const params = new URLSearchParams({
@@ -854,6 +806,7 @@ async function getUtilities(
       parcelId,
       electric: cached.electric ? JSON.parse(cached.electric) as ElectricAccess : null,
       broadband: JSON.parse(cached.broadband) as BroadbandProvider[],
+      broadbandDataAvailable: BROADBAND_DATA_AVAILABLE,
       fetchedAt: cached.fetched_at,
     };
     metrics.addMetric('UtilityAccessCacheHit', MetricUnit.Count, 1);
@@ -885,16 +838,16 @@ async function getUtilities(
   );
 
   if (!geomRow?.search_geom) {
-    return success({ parcelId, electric: null, broadband: [], fetchedAt: new Date().toISOString() } as UtilityAccess);
+    return success({
+      parcelId, electric: null, broadband: [], broadbandDataAvailable: BROADBAND_DATA_AVAILABLE,
+      fetchedAt: new Date().toISOString(),
+    } as UtilityAccess);
   }
 
   const arcGisGeomStr = JSON.stringify(geoJsonPolygonToArcGis(geomRow.search_geom));
 
-  const [electricRes, broadbandRes, serviceTerritoryRes] = await Promise.allSettled([
+  const [electricRes, serviceTerritoryRes] = await Promise.allSettled([
     fetchHifldElectricLines(arcGisGeomStr),
-    geomRow.lat != null && geomRow.lon != null
-      ? fetchFccBroadband(geomRow.lat, geomRow.lon)
-      : Promise.resolve([] as BroadbandProvider[]),
     geomRow.lat != null && geomRow.lon != null
       ? fetchHifldServiceTerritory(geomRow.lat, geomRow.lon)
       : Promise.resolve(null),
@@ -902,8 +855,6 @@ async function getUtilities(
 
   if (electricRes.status === 'rejected')
     logger.warn('HIFLD electric line query failed', { error: String(electricRes.reason) });
-  if (broadbandRes.status === 'rejected')
-    logger.warn('FCC broadband query failed', { error: String(broadbandRes.reason) });
   if (serviceTerritoryRes.status === 'rejected')
     logger.warn('HIFLD service territory query failed', { error: String(serviceTerritoryRes.reason) });
 
@@ -920,10 +871,10 @@ async function getUtilities(
       serviceTerritory: serviceTerritoryRes.value,
     };
   }
-  const broadband = broadbandRes.status === 'fulfilled' ? broadbandRes.value : [];
+  const broadband: BroadbandProvider[] = [];
   const fetchedAt = new Date().toISOString();
 
-  const allFailed = electricRes.status === 'rejected' && broadbandRes.status === 'rejected' && serviceTerritoryRes.status === 'rejected';
+  const allFailed = electricRes.status === 'rejected' && serviceTerritoryRes.status === 'rejected';
 
   if (!allFailed) {
     await execute(
@@ -935,7 +886,9 @@ async function getUtilities(
   }
 
   metrics.addMetric('UtilityAccessFetched', MetricUnit.Count, 1);
-  return success({ parcelId, electric, broadband, fetchedAt } as UtilityAccess);
+  return success({
+    parcelId, electric, broadband, broadbandDataAvailable: BROADBAND_DATA_AVAILABLE, fetchedAt,
+  } as UtilityAccess);
 }
 
 // ---------------------------------------------------------------------------
@@ -950,9 +903,11 @@ const FEMA_NFHL_URL =
 // FEMA National Risk Index — census-tract wildfire risk scores
 const FEMA_NRI_URL =
   'https://services.arcgis.com/XG15caxAWkAJOxhH/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0/query';
-// USGS Mineral Resources Data System — mine site locations
+// USGS Mineral Resources Data System — mine site locations.
+// The ArcGIS REST facade on mrdata.usgs.gov was retired host-wide (404). This is the
+// USGS-published hosted feature service, which carries a narrower set of fields.
 const USGS_MRDS_URL =
-  'https://mrdata.usgs.gov/arcgis/rest/services/MRDS/MapServer/0/query';
+  'https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Mineral_Resources_Data_System_MRDS_Compact_Version/FeatureServer/0/query';
 
 const MINE_SEARCH_RADIUS_METERS = 16_093; // 10 miles
 
@@ -1028,25 +983,43 @@ async function fetchWildfireRisk(lat: number, lon: number): Promise<WildfireRisk
   return valid.find((r) => raw.trim() === r) ?? null;
 }
 
+// Bounding box of an ArcGIS rings geometry, as an esriGeometryEnvelope.
+function ringsToEnvelope(arcGisGeomStr: string): string {
+  const { rings } = JSON.parse(arcGisGeomStr) as { rings: number[][][] };
+  const points = rings.flat();
+  const xs = points.map((p) => p[0]!);
+  const ys = points.map((p) => p[1]!);
+  return JSON.stringify({
+    xmin: Math.min(...xs), ymin: Math.min(...ys),
+    xmax: Math.max(...xs), ymax: Math.max(...ys),
+    spatialReference: { wkid: 4326 },
+  });
+}
+
 async function fetchMineSites(arcGisGeomStr: string): Promise<MineSite[]> {
+  // An envelope rather than the buffered polygon, and no resultRecordCount: this
+  // service takes 8-12s for a polygon query or with a record count, and about 0.3s
+  // for a plain envelope. The extra area is the corners of a 10-mile box, and the
+  // radius is a rough proximity signal anyway.
   const params = new URLSearchParams({
-    geometry: arcGisGeomStr,
-    geometryType: 'esriGeometryPolygon',
+    geometry: ringsToEnvelope(arcGisGeomStr),
+    geometryType: 'esriGeometryEnvelope',
     spatialRel: 'esriSpatialRelIntersects',
     inSR: '4326',
-    outFields: 'SITE_NAME,DEP_TYPE,WORK_TYPE,OPER_TYPE',
-    resultRecordCount: '20',
+    outFields: 'SITE_NAME,DEV_STAT,CODE_LIST,URL',
     returnGeometry: 'false',
     f: 'json',
   });
 
   const data = await fetchArcGis(USGS_MRDS_URL, params);
 
-  return (data.features ?? []).map((f) => ({
+  return (data.features ?? []).slice(0, 20).map((f) => ({
     name: (f.attributes.SITE_NAME as string | null) || null,
-    depositType: (f.attributes.DEP_TYPE as string | null) || null,
-    workType: (f.attributes.WORK_TYPE as string | null) || null,
-    operType: (f.attributes.OPER_TYPE as string | null) || null,
+    // e.g. "Past Producer", "Producer", "Occurrence"
+    devStatus: (f.attributes.DEV_STAT as string | null) || null,
+    // Commodity codes, e.g. " AG CU"
+    commodities: ((f.attributes.CODE_LIST as string | null) || '').trim() || null,
+    url: (f.attributes.URL as string | null) || null,
   }));
 }
 

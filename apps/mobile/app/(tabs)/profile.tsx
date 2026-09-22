@@ -82,7 +82,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.menuItem}>
-          <Text style={styles.menuItemText}>About LandFinder</Text>
+          <Text style={styles.menuItemText}>About Last Best Land</Text>
           <Text style={styles.menuItemArrow}>→</Text>
         </TouchableOpacity>
       </View>
@@ -91,7 +91,7 @@ export default function ProfileScreen() {
         <Text style={styles.logoutButtonText}>Sign Out</Text>
       </TouchableOpacity>
 
-      <Text style={styles.version}>LandFinder v0.1.0</Text>
+      <Text style={styles.version}>Last Best Land v0.1.0</Text>
     </View>
   );
 }

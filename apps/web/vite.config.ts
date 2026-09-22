@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@landfinder/shared': path.resolve(__dirname, '../../packages/shared/src/index.ts'),
+      '@lastbestland/shared': path.resolve(__dirname, '../../packages/shared/src/index.ts'),
     },
   },
   server: {

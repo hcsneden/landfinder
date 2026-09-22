@@ -1,4 +1,4 @@
-# LandFinder — Product Requirements Document
+# Last Best Land — Product Requirements Document
 
 **Version:** 0.1 — Draft  
 **Status:** In Review  
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-LandFinder is a web application that aggregates land listings from multiple real estate platforms and enriches each listing with authoritative public data — water rights, utility access, environmental conditions, buildability signals, and land history. The goal is to give buyers a complete picture of a parcel before they ever contact a broker, with a particular emphasis on rural and recreational land in Montana where the gaps between listing data and reality are large and consequential.
+Last Best Land is a web application that aggregates land listings from multiple real estate platforms and enriches each listing with authoritative public data — water rights, utility access, environmental conditions, buildability signals, and land history. The goal is to give buyers a complete picture of a parcel before they ever contact a broker, with a particular emphasis on rural and recreational land in Montana where the gaps between listing data and reality are large and consequential.
 
 Users can search by text or by drawing a map area, browse aggregated listings on an interactive map, and drill into a detailed property view that pulls from GIS layers, state agency databases, and configurable remote data sources (S3-hosted config files). A loan calculator gives buyers a quick sense of financing before they pursue a listing further.
 
@@ -18,7 +18,7 @@ Users can search by text or by drawing a map area, browse aggregated listings on
 
 Land buyers — especially buyers new to rural Montana — routinely make offers or lose earnest money because they did not know a parcel had no legal road access, no viable water right, was under a conservation easement that prohibits any building, or sat on top of an old mine adit. This information is publicly available but scattered across a dozen state and federal databases that most buyers do not know exist and cannot navigate efficiently.
 
-Existing listing platforms (LandWatch, Lands of America, Zillow) surface price, acreage, and photos. They do not surface the information that determines whether a parcel is actually usable. LandFinder bridges that gap.
+Existing listing platforms (LandWatch, Lands of America, Zillow) surface price, acreage, and photos. They do not surface the information that determines whether a parcel is actually usable. Last Best Land bridges that gap.
 
 ---
 

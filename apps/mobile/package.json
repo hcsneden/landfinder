@@ -1,5 +1,5 @@
 {
-  "name": "@landfinder/mobile",
+  "name": "@lastbestland/mobile",
   "version": "0.1.0",
   "main": "expo-router/entry",
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@landfinder/shared": "*",
+    "@lastbestland/shared": "*",
     "expo": "~55.0.8",
     "expo-router": "~4.0.22",
     "expo-linking": "~6.3.1",

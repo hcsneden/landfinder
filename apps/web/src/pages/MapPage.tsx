@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@hcsneden/design-library'
 import { useStore } from '../store'
+import { warmupApi } from '../services/api'
 import { MapView } from '../components/MapView'
 import { SearchPanel } from '../components/SearchPanel'
 import { ParcelDetailSheet } from '../components/ParcelDetailSheet'
@@ -15,6 +17,12 @@ export function MapPage() {
   )
   const clearAuth = useStore((state) => state.clearAuth)
   const togglePanel = useStore((state) => state.togglePanel)
+
+  // Start the Aurora resume now so the first search does not have to wait for it.
+  // Fire and forget: a failure here costs nothing, the search retries on its own.
+  useEffect(() => {
+    void warmupApi.wakeDatabase()
+  }, [])
 
   return (
     <>

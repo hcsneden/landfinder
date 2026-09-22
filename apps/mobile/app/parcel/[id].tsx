@@ -22,8 +22,8 @@ import {
   formatFlowRate,
   formatVolume,
   getListingSourceLabel,
-} from '@landfinder/shared';
-import type { Parcel, WaterRight, Listing, ParcelInsight } from '@landfinder/shared';
+} from '@lastbestland/shared';
+import type { Parcel, WaterRight, Listing, ParcelInsight } from '@lastbestland/shared';
 
 const { width: screenWidth } = Dimensions.get('window');
 

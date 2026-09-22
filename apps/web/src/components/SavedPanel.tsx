@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useStore } from '../store'
 import { parcelApi, userApi } from '../services/api'
-import { formatAcreage, formatDate } from '@landfinder/shared'
-import type { SavedParcel } from '@landfinder/shared'
+import { formatAcreage, formatDate } from '@lastbestland/shared'
+import type { SavedParcel } from '@lastbestland/shared'
 
 function unwrap<T>(response: { success: boolean; data?: T; error?: { message?: string } }): T {
   if (!response.success || !response.data) throw new Error(response.error?.message)

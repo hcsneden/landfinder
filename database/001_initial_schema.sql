@@ -1,4 +1,4 @@
--- LandFinder Initial Database Schema
+-- Last Best Land Initial Database Schema
 -- PostgreSQL with PostGIS extension
 
 -- Enable PostGIS for geographic data

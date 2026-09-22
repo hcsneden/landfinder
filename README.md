@@ -1,4 +1,4 @@
-# LandFinder
+# Last Best Land
 
 A full-stack application helping users navigate the land buying process in Montana. Find parcels, view water rights, and aggregate listings from multiple sources - all powered by AI.
 

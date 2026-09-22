@@ -11,8 +11,8 @@ import {
 import MapView, { Marker, Region } from 'react-native-maps';
 import { router } from 'expo-router';
 import { parcelApi } from '../../services/api';
-import { formatAcreage } from '@landfinder/shared';
-import type { Parcel } from '@landfinder/shared';
+import { formatAcreage } from '@lastbestland/shared';
+import type { Parcel } from '@lastbestland/shared';
 
 const MONTANA_REGION: Region = {
   latitude: 46.9,

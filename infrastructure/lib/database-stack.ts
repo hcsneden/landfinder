@@ -21,8 +21,10 @@ export class DatabaseStack extends cdk.Stack {
 
     // No NAT. Lambdas run outside the VPC and reach Aurora through the RDS Data API,
     // and the scraper tasks run in public subnets with a public IP.
-    // "Private" was PRIVATE_WITH_EGRESS behind a NAT Gateway. It is isolated now and
-    // only kept so the API stack's old subnet imports resolve. Remove with legacyInstance.
+    // "Private" was PRIVATE_WITH_EGRESS behind a NAT Gateway. Nothing uses it now, but
+    // it stays: CDK allocates subnet CIDRs in subnetConfiguration order, so deleting it
+    // would renumber the Isolated subnets and force a replacement of the ones Aurora
+    // sits in. Empty subnets cost nothing.
     this.vpc = new ec2.Vpc(this, 'LandFinderVpc', {
       vpcName: 'landfinder-vpc',
       maxAzs: 2,
@@ -62,47 +64,10 @@ export class DatabaseStack extends cdk.Stack {
       'Allow PostgreSQL from VPC'
     );
 
-    // Original RDS instance. No longer used by the app, kept only until the Aurora
-    // cluster is verified, then removed (final snapshot) in a follow-up deploy.
-    const legacyInstance = new rds.DatabaseInstance(this, 'LandFinderDatabase', {
-      instanceIdentifier: 'landfinder-db',
-      engine: rds.DatabaseInstanceEngine.postgres({
-        version: rds.PostgresEngineVersion.VER_16_9,
-      }),
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO), // MVP: t3.micro
-      vpc: this.vpc,
-      vpcSubnets: databaseSubnets,
-      securityGroups: [dbSecurityGroup],
-      databaseName: 'landfinder',
-      credentials: rds.Credentials.fromGeneratedSecret('landfinder_admin', {
-        secretName: 'landfinder/db/credentials',
-      }),
-      allocatedStorage: 20,
-      maxAllocatedStorage: 100,
-      storageType: rds.StorageType.GP3,
-      multiAz: false, // MVP: single AZ
-      publiclyAccessible: false,
-      backupRetention: cdk.Duration.days(7),
-      deletionProtection: false, // off so the cleanup deploy can remove it
-      removalPolicy: cdk.RemovalPolicy.SNAPSHOT,
-    });
-
-    // The API and scraping stacks import these until they are redeployed against Aurora.
-    // Keeping them lets this stack deploy first. Remove together with legacyInstance.
-    const legacyExports: Array<[string, string]> = [
-      ['ExportsOutputFnGetAttLandFinderDatabaseA23662A9EndpointAddress796D9364', legacyInstance.dbInstanceEndpointAddress],
-      ['ExportsOutputFnGetAttLandFinderDatabaseA23662A9EndpointPortA0C9B7A3', legacyInstance.dbInstanceEndpointPort],
-      ['ExportsOutputRefLandFinderDatabaseSecretAttachment9D9982D639AF7956', legacyInstance.secret!.secretArn],
-      ['ExportsOutputRefLandFinderVpcPrivateSubnet1Subnet66404AE1E296EC9A', this.vpc.selectSubnets({ subnetGroupName: 'Private' }).subnetIds[0]],
-      ['ExportsOutputRefLandFinderVpcPrivateSubnet2Subnet3415C61562EF5D33', this.vpc.selectSubnets({ subnetGroupName: 'Private' }).subnetIds[1]],
-    ];
-    for (const [outputId, value] of legacyExports) {
-      new cdk.CfnOutput(this, outputId, { value, exportName: `${this.stackName}:${outputId}` });
-    }
-
-    // Aurora Serverless v2, restored from a snapshot of the instance above.
-    // Min capacity 0 pauses compute after 10 idle minutes. Resume takes ~15s,
-    // 30s+ after a day paused, so the API stack pings it every 12 hours.
+    // Aurora Serverless v2, restored from a snapshot of the RDS instance this replaced
+    // (landfinder-db, since removed). Min capacity 0 pauses compute after 10 idle minutes.
+    // Resume takes ~20s, longer after a day paused, so the API stack pings it every 12
+    // hours and the web app calls GET /warmup on load.
     const auroraSecret = new rds.DatabaseSecret(this, 'AuroraSecret', {
       username: 'landfinder_admin',
       dbname: 'landfinder',

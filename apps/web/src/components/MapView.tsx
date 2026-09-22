@@ -3,8 +3,8 @@ import { useShallow } from 'zustand/react/shallow'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useStore } from '../store'
-import { formatPrice } from '@landfinder/shared'
-import type { SearchResult } from '@landfinder/shared'
+import { formatPrice } from '@lastbestland/shared'
+import type { SearchResult } from '@lastbestland/shared'
 import { searchApi } from '../services/api'
 
 // CARTO Voyager — free, no API key required

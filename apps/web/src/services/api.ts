@@ -19,7 +19,7 @@ import type {
   EnvironmentalRisk,
   ConservationEasement,
   ListingStatus,
-} from '@landfinder/shared'
+} from '@lastbestland/shared'
 import { useStore } from '../store'
 
 // SearchCriteria already includes bbox via shared types; alias for clarity at the call site
@@ -29,7 +29,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
 function getToken(): string | null {
   try {
-    const stored = localStorage.getItem('landfinder-session')
+    const stored = localStorage.getItem('lastbestland-session')
     if (!stored) return null
     const parsed = JSON.parse(stored) as { state?: { tokens?: AuthTokens } }
     const tokens = parsed?.state?.tokens
@@ -114,6 +114,12 @@ export const parcelApi = {
   getConservationEasements: (id: string) => apiFetch<ConservationEasement[]>(`/parcels/${id}/conservation-easements`),
   checkListingStatus: (id: string, opts?: { refresh?: boolean }) =>
     apiFetch<ListingStatus>(`/parcels/${id}/listing-status${opts?.refresh ? '?refresh=true' : ''}`),
+}
+
+// Aurora pauses after 10 idle minutes and takes about 20 seconds to come back.
+// Calling this on load moves that wait off the user's first search.
+export const warmupApi = {
+  wakeDatabase: () => apiFetch<{ ready: boolean; resumeMs: number }>('/warmup'),
 }
 
 export const userApi = {

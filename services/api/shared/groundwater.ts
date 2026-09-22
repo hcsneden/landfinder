@@ -16,7 +16,7 @@
  */
 import { queryOne, execute } from './db';
 import { logger } from './logger';
-import type { GroundwaterInfo, WellLog } from '@landfinder/shared';
+import type { GroundwaterInfo, WellLog } from '@lastbestland/shared';
 
 const GWIC_WELLS_URL =
   'https://services2.arcgis.com/DRQySz3VhPgOv7Bo/arcgis/rest/services/Source_Aquifer_Explorer_Borehole_Data/FeatureServer/0/query';

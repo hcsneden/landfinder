@@ -15,7 +15,7 @@
  */
 import { queryOne, execute } from './db';
 import { logger } from './logger';
-import type { SoilInfo, SoilMapUnit } from '@landfinder/shared';
+import type { SoilInfo, SoilMapUnit } from '@lastbestland/shared';
 
 const SDA_URL = 'https://sdmdataaccess.nrcs.usda.gov/Tabular/post.rest';
 const SOIL_TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days — SSURGO changes rarely
@@ -38,7 +38,7 @@ function buildQuery(wkt: string): string {
     SELECT
       m.mukey,
       m.muname,
-      mag.farmlndcl,
+      m.farmlndcl,
       mag.drclassdcd,
       mag.slopegraddcp,
       c.taxclname,
@@ -65,7 +65,11 @@ async function fetchSda(wkt: string): Promise<SoilMapUnit[]> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: buildQuery(wkt), format: 'JSON+COLUMNNAME' }),
     });
-    if (!res.ok) throw new Error(`SDA HTTP ${res.status}`);
+    // SDA puts the actual SQL error in the body, so include it or the log says nothing useful.
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`SDA HTTP ${res.status} ${body.slice(0, 300)}`.trim());
+    }
     const data = (await res.json()) as SdaResponse;
 
     const table = data.Table ?? [];
