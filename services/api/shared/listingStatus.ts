@@ -15,49 +15,47 @@ export interface ListingStatusResult {
   fetchedAt: string;
 }
 
+// price is DECIMAL in Postgres, and the Data API decoder returns numeric as a
+// string to avoid precision loss on big values. Typed as it actually arrives, then
+// converted once in rowToResult, so a cache hit and a fresh check agree.
 interface CacheRow {
   for_sale: boolean;
   confidence: string;
-  price: number | null;
+  price: string | null;
   listing_url: string | null;
   source: string | null;
   summary: string;
   fetched_at: string;
 }
 
-// Keyed by the cadastral PARCELID rather than the internal parcels.id UUID, since
-// candidate parcels from an ambiguous search aren't upserted into `parcels` until
-// the user picks one — this lets us cache/check them before that happens.
-export async function getOrCheckListingStatus(
+function rowToResult(row: CacheRow): ListingStatusResult {
+  return {
+    forSale: row.for_sale,
+    confidence: row.confidence as ListingStatusResult['confidence'],
+    price: row.price === null ? null : Number(row.price),
+    listingUrl: row.listing_url,
+    source: row.source,
+    summary: row.summary,
+    fetchedAt: row.fetched_at,
+  };
+}
+
+const CACHE_COLUMNS =
+  'for_sale, confidence, price, listing_url, source, summary, fetched_at::text';
+
+/**
+ * Run the check and store it. Assumes the caller has already decided the cache
+ * cannot answer, so it does not read the cache first.
+ */
+async function checkAndStore(
   parcelNumber: string,
-  address: string | null,
-  opts: { forceRefresh?: boolean } = {}
+  address: string
 ): Promise<ListingStatusResult | null> {
-  if (!address) return null;
-
-  const cached = await queryOne<CacheRow>(
-    `SELECT for_sale, confidence, price, listing_url, source, summary, fetched_at::text
-     FROM listing_status_cache WHERE parcel_number = $1`,
-    [parcelNumber]
-  );
-  const cacheAge = cached ? Date.now() - new Date(cached.fetched_at).getTime() : Infinity;
-
-  if (!opts.forceRefresh && cached && cacheAge <= LISTING_STATUS_TTL_MS) {
-    return {
-      forSale: cached.for_sale,
-      confidence: cached.confidence as ListingStatusResult['confidence'],
-      price: cached.price,
-      listingUrl: cached.listing_url,
-      source: cached.source,
-      summary: cached.summary,
-      fetchedAt: cached.fetched_at,
-    };
-  }
-
   try {
     const searchResults = await searchWeb(`"${address}" for sale`);
     const result = await checkListingStatusFromSearchResults(address, searchResults);
     const fetchedAt = new Date().toISOString();
+
     await execute(
       `INSERT INTO listing_status_cache (parcel_number, for_sale, confidence, price, listing_url, source, summary, fetched_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
@@ -71,6 +69,7 @@ export async function getOrCheckListingStatus(
          fetched_at = NOW()`,
       [parcelNumber, result.forSale, result.confidence, result.price, result.listingUrl, result.source, result.summary]
     );
+
     return { ...result, fetchedAt };
   } catch (err) {
     logger.warn('Listing status check failed', {
@@ -81,36 +80,49 @@ export async function getOrCheckListingStatus(
   }
 }
 
+// Keyed by the cadastral PARCELID rather than the internal parcels.id UUID, since
+// candidate parcels from an ambiguous search aren't upserted into `parcels` until
+// the user picks one — this lets us cache/check them before that happens.
+export async function getOrCheckListingStatus(
+  parcelNumber: string,
+  address: string | null,
+  opts: { forceRefresh?: boolean } = {}
+): Promise<ListingStatusResult | null> {
+  if (!address) return null;
+
+  const cached = await queryOne<CacheRow>(
+    `SELECT ${CACHE_COLUMNS} FROM listing_status_cache WHERE parcel_number = $1`,
+    [parcelNumber]
+  );
+  const cacheAge = cached ? Date.now() - new Date(cached.fetched_at).getTime() : Infinity;
+
+  if (!opts.forceRefresh && cached && cacheAge <= LISTING_STATUS_TTL_MS) {
+    return rowToResult(cached);
+  }
+
+  return checkAndStore(parcelNumber, address);
+}
+
 // Each fresh check is a web search plus a Bedrock call, so a result set is served
 // from cache first and only a bounded number of misses are checked live. The rest
 // come back null and get filled on a later search that hits the same parcels.
 const BATCH_LIVE_CHECK_CAP = 15;
 const BATCH_CONCURRENCY = 5;
 
-function rowToResult(row: CacheRow): ListingStatusResult {
-  return {
-    forSale: row.for_sale,
-    confidence: row.confidence as ListingStatusResult['confidence'],
-    price: row.price,
-    listingUrl: row.listing_url,
-    source: row.source,
-    summary: row.summary,
-    fetchedAt: row.fetched_at,
-  };
-}
-
-// One query for the whole result set rather than a round trip per parcel.
+// One query for the whole result set rather than a round trip per parcel. The
+// freshness window is the same TTL the single-parcel path uses, passed as a
+// parameter so the two cannot drift apart.
 async function getCachedListingStatuses(
   parcelNumbers: string[]
 ): Promise<Map<string, ListingStatusResult>> {
   if (parcelNumbers.length === 0) return new Map();
 
   const rows = await query<CacheRow & { parcel_number: string }>(
-    `SELECT parcel_number, for_sale, confidence, price, listing_url, source, summary, fetched_at::text
+    `SELECT parcel_number, ${CACHE_COLUMNS}
      FROM listing_status_cache
      WHERE parcel_number = ANY($1::text[])
-       AND fetched_at > NOW() - INTERVAL '7 days'`,
-    [parcelNumbers]
+       AND fetched_at > NOW() - ($2::text || ' milliseconds')::interval`,
+    [parcelNumbers, String(LISTING_STATUS_TTL_MS)]
   );
 
   return new Map(rows.map((r) => [r.parcel_number, rowToResult(r)]));
@@ -149,9 +161,17 @@ async function mapWithConcurrency<T, R>(
 export async function getListingStatusesForParcels(
   parcels: Array<{ parcelNumber: string | null; address: string | null }>
 ): Promise<Map<string, ListingStatusResult>> {
-  const addressable = parcels.filter(
-    (p): p is { parcelNumber: string; address: string } => !!p.parcelNumber && !!p.address
-  );
+  // Deduped by parcel number: the same parcel appearing twice in a result set would
+  // otherwise spend two live checks on one answer.
+  const addressable = [
+    ...new Map(
+      parcels
+        .filter(
+          (p): p is { parcelNumber: string; address: string } => !!p.parcelNumber && !!p.address
+        )
+        .map((p) => [p.parcelNumber, p] as const)
+    ).values(),
+  ];
   if (addressable.length === 0) return new Map();
 
   const statuses = await getCachedListingStatuses(addressable.map((p) => p.parcelNumber));
@@ -161,8 +181,11 @@ export async function getListingStatusesForParcels(
     .slice(0, BATCH_LIVE_CHECK_CAP);
 
   if (misses.length > 0) {
+    // checkAndStore rather than getOrCheckListingStatus: the query above already
+    // established these are misses, so re-reading the cache per parcel would be
+    // BATCH_LIVE_CHECK_CAP extra Data API round trips for a known answer.
     const checked = await mapWithConcurrency(misses, BATCH_CONCURRENCY, (p) =>
-      getOrCheckListingStatus(p.parcelNumber, p.address)
+      checkAndStore(p.parcelNumber, p.address)
     );
 
     checked.forEach((r, i) => {
